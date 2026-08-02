@@ -139,7 +139,9 @@ async def chat_completion(req: ChatRequest):
                     print(f"[Attachment Warning] Failed to parse attachment {att.filename}: {parse_err}")
         
         if attached_text_blocks:
-            req.messages[-1]["content"] += "".join(attached_text_blocks)
+            # Guarantee text attachments append to the last 'user' role message
+            target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
+            target_user_msg["content"] += "".join(attached_text_blocks)
 
     try:
         response_text = await model_router.generate(
@@ -150,7 +152,6 @@ async def chat_completion(req: ChatRequest):
             temperature=temp,
             image_parts=image_parts
         )
-
 
         duration_ms = int((time.time() - start_time) * 1000)
         asyncio.create_task(
@@ -175,7 +176,9 @@ async def chat_completion(req: ChatRequest):
             "response": response_text
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        err_detail = str(e) or repr(e) or "An unexpected model engine error occurred."
+        raise HTTPException(status_code=500, detail=err_detail)
+
 
 @router.post("/stream")
 async def chat_completion_stream(req: ChatRequest):

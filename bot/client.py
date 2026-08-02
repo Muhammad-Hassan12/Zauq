@@ -118,7 +118,7 @@ async def on_message(message: discord.Message):
     history_messages = []
     try:
         async for past_msg in target_channel.history(limit=15, oldest_first=False):
-            if past_msg.id == initial_msg.id:
+            if past_msg.id == initial_msg.id or past_msg.id == message.id:
                 continue
             role = "assistant" if past_msg.author == bot.user else "user"
             msg_text = past_msg.content.replace(f"<@{bot.user.id}>", "").strip()
@@ -128,8 +128,9 @@ async def on_message(message: discord.Message):
     except Exception as e:
         print(f"[Bot Warning] History fetch failed: {e}")
 
-    if not history_messages:
-        history_messages = [{"role": "user", "content": content}]
+    # Always guarantee current incoming user message is at the end as role="user"
+    history_messages.append({"role": "user", "content": content})
+
 
     # Process Discord attachments (up to 3 files)
     attachments_payload = []
