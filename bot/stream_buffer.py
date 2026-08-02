@@ -1,3 +1,4 @@
+import re
 import discord
 from typing import List
 
@@ -57,3 +58,35 @@ def split_message_chunks(text: str, max_length: int = 1900) -> List[str]:
         chunks.append(current_chunk)
 
     return chunks
+
+def compress_assistant_history(text: str, max_chars: int = 350) -> str:
+    """
+    Intelligent Assistant History Compressor.
+    Replaces raw code blocks with semantic tags [Provided <lang> snippet (~N lines)]
+    and extracts key summary lines up to ~350 chars (~75 tokens) for history efficiency.
+    """
+    if not text:
+        return ""
+
+    def replace_code_block(match: re.Match) -> str:
+        lang = match.group(1).strip() if match.group(1) else "code"
+        code_body = match.group(2) or ""
+        line_count = len(code_body.strip().split("\n"))
+        return f"\n[Provided {lang} snippet (~{line_count} lines)]\n"
+
+    # Match fenced code blocks ```lang\ncode\n```
+    pattern = r"```([a-zA-Z0-9_\-\+]*)\n(.*?)```"
+    compressed = re.sub(pattern, replace_code_block, text, flags=re.DOTALL)
+
+    # Clean up multiple newlines
+    compressed = re.sub(r"\n{3,}", "\n\n", compressed).strip()
+
+    # Truncate remaining text to max_chars if longer, preserving word boundary
+    if len(compressed) > max_chars:
+        trimmed = compressed[:max_chars]
+        last_space = trimmed.rfind(" ")
+        if last_space > 100:
+            trimmed = trimmed[:last_space]
+        compressed = trimmed + "..."
+
+    return compressed

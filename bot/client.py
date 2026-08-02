@@ -10,9 +10,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-from bot.stream_buffer import split_message_chunks
+from bot.stream_buffer import split_message_chunks, compress_assistant_history
 
 BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -114,19 +115,22 @@ async def on_message(message: discord.Message):
     # Send initial placeholder message
     initial_msg = await target_channel.send("💭 *Thinking...*")
 
-    # Fetch extended history context (last 15 messages for full context memory)
+    # Fetch history context (last 8 messages for optimal context freshness)
     history_messages = []
     try:
-        async for past_msg in target_channel.history(limit=15, oldest_first=False):
+        async for past_msg in target_channel.history(limit=8, oldest_first=False):
             if past_msg.id == initial_msg.id or past_msg.id == message.id:
                 continue
             role = "assistant" if past_msg.author == bot.user else "user"
             msg_text = past_msg.content.replace(f"<@{bot.user.id}>", "").strip()
             if msg_text and not msg_text.startswith("💭 *Thinking...*"):
+                if role == "assistant":
+                    msg_text = compress_assistant_history(msg_text)
                 history_messages.append({"role": role, "content": msg_text})
         history_messages.reverse()
     except Exception as e:
         print(f"[Bot Warning] History fetch failed: {e}")
+
 
     # Always guarantee current incoming user message is at the end as role="user"
     history_messages.append({"role": "user", "content": content})
