@@ -1,7 +1,4 @@
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
+import io
 import httpx
 import discord
 from discord import app_commands
@@ -17,7 +14,7 @@ class ImageSlash(commands.Cog):
     @app_commands.command(name="image", description="Generate an AI visual image based on a text prompt")
     @app_commands.describe(
         prompt="Description of the image to generate",
-        model="Choose image generation model (DigitalOcean Gradient)"
+        model="Choose image generation model provider"
     )
     @app_commands.choices(
         model=[
@@ -40,23 +37,23 @@ class ImageSlash(commands.Cog):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(timeout=90.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/media/image", json=payload)
                 if res.status_code != 200:
-                    await interaction.followup.send(f"⚠️ Image Generation Error: {res.text}")
+                    err_msg = res.json().get("detail", res.text) if res.headers.get("content-type") == "application/json" else res.text
+                    await interaction.followup.send(f"⚠️ Image Generation Error ({res.status_code}): {err_msg}")
                     return
 
-                import io
                 image_bytes = io.BytesIO(res.content)
-
                 discord_file = discord.File(image_bytes, filename="zauq_ai_art.png")
+
                 embed = discord.Embed(
                     title="🎨 AI Image Generation",
                     description=f"**Prompt:** *\"{prompt}\"*",
                     color=discord.Color.blue()
                 )
                 embed.set_image(url="attachment://zauq_ai_art.png")
-                embed.set_footer(text=f"Requested by @{interaction.user.name}")
+                embed.set_footer(text=f"Model: {selected_model} | Requested by @{interaction.user.name}")
 
                 await interaction.followup.send(embed=embed, file=discord_file)
 

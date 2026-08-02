@@ -112,26 +112,35 @@ Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 
 ---
 
-## 📜 Complete Slash Command Reference (14 Commands)
+## 📜 Complete Slash Command Reference (23 Commands)
 
 | Command | Category | Description |
 |---|---|---|
 | `/mode` | Core | Switch channel operating mode (`dev` or `hangout`). |
+| `/summarize` | Core | Summarize thread or channel discussion into bullet points. |
 | `/model status` | Models | View current model tier, provider, and model name. |
-| `/model set` | Models | Set channel model tier (1, 2, 3), provider, and model name (with autocomplete). |
-| `/run` | Sandbox | Safely execute Python, JavaScript, or Bash code in an isolated Docker container. |
-| `/remember` | Lore | Save a server lore fact, rule, or inside joke into vector memory. |
+| `/model set` | Models | Set channel model tier (1, 2, 3), provider, and model name. |
+| `/run` | Sandbox | Safely execute Python, JS, or Bash code in Docker. |
+| `/remember` | Lore | Save a server lore fact or rule into vector memory. |
+| `/rank` | XP | Check your XP level, rank, and progress. |
+| `/leaderboard` | XP | View top server members by XP. |
+| `/remind` | Utility | Schedule a reminder message. |
+| `/export` | Utility | Export conversation history as a Markdown file. |
 | `/github pr` | GitHub | Fetch and summarize a GitHub Pull Request diff. |
 | `/github issue` | GitHub | Fetch and display a GitHub Issue description. |
-| `/ingest_repo` | GitHub | Ingest a GitHub repository README into server vector lore memory. |
-| `/tts` | Voice | Generate high-quality neural voice speech (`.mp3` file). |
+| `/ingest_repo` | GitHub | Ingest a GitHub repository README into server lore. |
+| `/tts` | Voice | Generate high-quality multi-language neural speech. |
 | `/voice join` | Voice | Connect Zauq to your voice channel. |
 | `/voice leave` | Voice | Disconnect Zauq from the voice channel. |
 | `/meme` | Media | Generate text-overlay memes with impact font styling. |
-| `/image` | Media | Generate AI visual art cards from a text prompt. |
-| `/trivia` | Games | Play an interactive multiple-choice trivia game with Discord UI buttons. |
-| `/stats` | Admin | View server request volume, average response latency, and provider metrics. |
-| `/forget` | Privacy | Purge all stored episodic memory facts associated with your Discord User ID. |
+| `/image` | Media | Generate AI art (Gemini Flash Image / DigitalOcean). |
+| `/trivia` | Games | Play interactive trivia with difficulty choices & XP. |
+| `/moderation enable` | Admin | Enable or disable AI content moderation. |
+| `/moderation sensitivity` | Admin | Set AI content filtering sensitivity. |
+| `/moderation log` | Admin | View recent moderation log entries. |
+| `/admin memory` | Admin | View vector memory usage statistics. |
+| `/stats` | Analytics | View server volume, latency, and provider metrics. |
+| `/forget` | Privacy | Purge stored episodic memories for your User ID. |
 | `/privacy` | Privacy | Display Zauq data privacy disclosure. |
 
 ---

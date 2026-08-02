@@ -1,15 +1,25 @@
-import asyncio
 import time
-from fastapi import APIRouter, HTTPException
-
+import base64
+import asyncio
+import logging
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Literal
+
 from backend.memory.db import db_helper
 from backend.models.router import model_router
 from backend.memory.episodic import extract_and_store_user_memories
+from backend.parsers.file_parser import parse_attachment
+from backend.memory.metrics import log_request_metric
+
+logger = logging.getLogger("zauq.chat")
 
 router = APIRouter(prefix="/api/chat", tags=["Chat Engine"])
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    content: str
 
 class AttachmentItem(BaseModel):
     filename: str
@@ -21,10 +31,9 @@ class ChatRequest(BaseModel):
     guild_id: Optional[str] = None
     user_id: Optional[str] = None
     user_name: Optional[str] = None
-    messages: List[Dict[str, str]]
+    messages: List[Dict[str, Any]]
     mode_override: Optional[str] = None
     attachments: Optional[List[AttachmentItem]] = None
-
 
 class ChannelProfileRequest(BaseModel):
     channel_id: str
@@ -48,7 +57,6 @@ async def update_channel_profile(req: ChannelProfileRequest):
         return {"status": "success", "data": res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 DEV_PERSONA_SEED = (
     "You are Zauq operating in Dev Mode. You are a senior software engineer and architect. "
@@ -111,7 +119,7 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
         provider = "gemini"
         model_name = "gemini-2.5-flash"
 
-    # 5. Enforce strict output guard (prevents Gemma/Open model CoT scratchpad leaks)
+    # 5. Enforce strict output guard
     persona += (
         "\n\n[CRITICAL OUTPUT DIRECTIVE]: "
         "Speak DIRECTLY to the user as Zauq. Never output internal thoughts, analysis, draft options, "
@@ -120,13 +128,8 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
 
     return persona, mode, temp, provider, model_name
 
-
-import base64
-from backend.parsers.file_parser import parse_attachment
-from backend.memory.metrics import log_request_metric
-
 @router.post("")
-async def chat_completion(req: ChatRequest):
+async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
     start_time = time.time()
     persona, mode, temp, provider, model_name = await _build_chat_context(req)
 
@@ -144,10 +147,9 @@ async def chat_completion(req: ChatRequest):
                     else:
                         attached_text_blocks.append(f"\n\n[Attached Document: {att.filename}]\n{parsed['content']}")
                 except Exception as parse_err:
-                    print(f"[Attachment Warning] Failed to parse attachment {att.filename}: {parse_err}")
+                    logger.warning(f"Failed to parse attachment {att.filename}: {parse_err}")
         
         if attached_text_blocks:
-            # Guarantee text attachments append to the last 'user' role message
             target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
             target_user_msg["content"] += "".join(attached_text_blocks)
 
@@ -162,19 +164,17 @@ async def chat_completion(req: ChatRequest):
         )
 
         duration_ms = int((time.time() - start_time) * 1000)
-        asyncio.create_task(
-            log_request_metric(req.guild_id, req.channel_id, req.user_id, 1, provider, model_name, duration_ms)
+        background_tasks.add_task(
+            log_request_metric, req.guild_id, req.channel_id, req.user_id, 1, provider, model_name, duration_ms
         )
 
-        # Trigger background episodic memory extraction
         if req.user_id:
-            asyncio.create_task(
-                extract_and_store_user_memories(
-                    user_id=req.user_id,
-                    messages=req.messages + [{"role": "assistant", "content": response_text}],
-                    provider=provider,
-                    model_name=model_name
-                )
+            background_tasks.add_task(
+                extract_and_store_user_memories,
+                user_id=req.user_id,
+                messages=req.messages + [{"role": "assistant", "content": response_text}],
+                provider=provider,
+                model_name=model_name
             )
 
         return {
@@ -184,9 +184,9 @@ async def chat_completion(req: ChatRequest):
             "response": response_text
         }
     except Exception as e:
+        logger.error(f"Chat completion error: {e}")
         err_detail = str(e) or repr(e) or "An unexpected model engine error occurred."
         raise HTTPException(status_code=500, detail=err_detail)
-
 
 @router.post("/stream")
 async def chat_completion_stream(req: ChatRequest):
@@ -211,7 +211,6 @@ async def chat_completion_stream(req: ChatRequest):
                 log_request_metric(req.guild_id, req.channel_id, req.user_id, 1, provider, model_name, duration_ms)
             )
 
-            # Background extraction post-stream
             full_response = "".join(collected_chunks)
             if req.user_id and full_response:
                 asyncio.create_task(
@@ -224,7 +223,7 @@ async def chat_completion_stream(req: ChatRequest):
                 )
 
         except Exception as e:
+            logger.error(f"Streaming error: {e}")
             yield f"\n[Error: {str(e)}]"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-

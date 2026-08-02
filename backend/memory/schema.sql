@@ -1,4 +1,4 @@
--- Supabase Schema for Zauq (AgenticEra Hybrid AI Discord Bot)
+-- Supabase Schema for Zauq (AgenticEra Hybrid AI Discord Bot) v3.0
 
 -- Enable pgvector extension if not enabled
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS guild_configs (
     guild_id TEXT PRIMARY KEY,
     guild_name TEXT NOT NULL,
     default_mode TEXT NOT NULL DEFAULT 'hangout' CHECK (default_mode IN ('dev', 'hangout')),
+    moderation_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    moderation_sensitivity TEXT NOT NULL DEFAULT 'medium' CHECK (moderation_sensitivity IN ('low', 'medium', 'high')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -43,23 +45,83 @@ CREATE TABLE IF NOT EXISTS user_memories (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Index for user_id lookup
 CREATE INDEX IF NOT EXISTS idx_user_memories_user_id ON user_memories(user_id);
-
--- Vector similarity search index
 CREATE INDEX IF NOT EXISTS idx_user_memories_embedding ON user_memories USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
--- 5. Server Lore / Knowledge Base (for Phase 2 RAG)
+-- 5. Server Lore / Knowledge Base
 CREATE TABLE IF NOT EXISTS server_lore (
     lore_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     guild_id TEXT NOT NULL,
-    source_type TEXT NOT NULL CHECK (source_type IN ('repo', 'doc', 'inside_joke', 'rule')),
+    source_type TEXT NOT NULL CHECK (source_type IN ('repo', 'doc', 'inside_joke', 'rule', 'summary')),
     content TEXT NOT NULL,
     embedding vector(768),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_server_lore_guild ON server_lore(guild_id);
+
+-- 6. Request Logs & Cost Audit Dashboard
+CREATE TABLE IF NOT EXISTS request_logs (
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    guild_id TEXT,
+    channel_id TEXT,
+    user_id TEXT,
+    tier INT NOT NULL DEFAULT 1,
+    provider TEXT NOT NULL DEFAULT 'gemini',
+    model_name TEXT NOT NULL DEFAULT 'gemini-2.5-flash',
+    response_time_ms INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_request_logs_guild ON request_logs(guild_id);
+
+-- 7. User Stats & XP Reputation System
+CREATE TABLE IF NOT EXISTS user_stats (
+    user_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    display_name TEXT,
+    xp INT NOT NULL DEFAULT 0,
+    level INT NOT NULL DEFAULT 1,
+    messages_count INT NOT NULL DEFAULT 0,
+    commands_used INT NOT NULL DEFAULT 0,
+    trivia_correct INT NOT NULL DEFAULT 0,
+    trivia_played INT NOT NULL DEFAULT 0,
+    streak_days INT NOT NULL DEFAULT 0,
+    last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_stats_guild ON user_stats(guild_id);
+CREATE INDEX IF NOT EXISTS idx_user_stats_xp ON user_stats(xp DESC);
+
+-- 8. Scheduled Reminders
+CREATE TABLE IF NOT EXISTS scheduled_reminders (
+    reminder_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    guild_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    remind_at TIMESTAMPTZ NOT NULL,
+    delivered BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminders_pending ON scheduled_reminders(remind_at) WHERE delivered = FALSE;
+
+-- 9. Moderation Log
+CREATE TABLE IF NOT EXISTS moderation_log (
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    guild_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    message_content TEXT,
+    action_taken TEXT NOT NULL CHECK (action_taken IN ('flagged', 'warned', 'deleted')),
+    severity TEXT NOT NULL DEFAULT 'low' CHECK (severity IN ('low', 'medium', 'high')),
+    reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_moderation_guild ON moderation_log(guild_id);
 
 -- ========================================================
 -- Enable Row Level Security (RLS) & Policies
@@ -69,6 +131,10 @@ ALTER TABLE channel_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_selection ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_memories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE server_lore ENABLE ROW LEVEL SECURITY;
+ALTER TABLE request_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_stats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scheduled_reminders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE moderation_log ENABLE ROW LEVEL SECURITY;
 
 -- Allow full access for backend service role
 CREATE POLICY "Allow service role full access on guild_configs" ON guild_configs FOR ALL USING (true);
@@ -76,6 +142,10 @@ CREATE POLICY "Allow service role full access on channel_profiles" ON channel_pr
 CREATE POLICY "Allow service role full access on model_selection" ON model_selection FOR ALL USING (true);
 CREATE POLICY "Allow service role full access on user_memories" ON user_memories FOR ALL USING (true);
 CREATE POLICY "Allow service role full access on server_lore" ON server_lore FOR ALL USING (true);
+CREATE POLICY "Allow service role full access on request_logs" ON request_logs FOR ALL USING (true);
+CREATE POLICY "Allow service role full access on user_stats" ON user_stats FOR ALL USING (true);
+CREATE POLICY "Allow service role full access on scheduled_reminders" ON scheduled_reminders FOR ALL USING (true);
+CREATE POLICY "Allow service role full access on moderation_log" ON moderation_log FOR ALL USING (true);
 
 -- Vector similarity search RPC function for server_lore
 CREATE OR REPLACE FUNCTION match_server_lore(
@@ -107,21 +177,4 @@ BEGIN
     ORDER BY server_lore.embedding <=> query_embedding
     LIMIT match_count;
 END;
--- 6. Request Logs & Cost Audit Dashboard
-CREATE TABLE IF NOT EXISTS request_logs (
-    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    guild_id TEXT,
-    channel_id TEXT,
-    user_id TEXT,
-    tier INT NOT NULL DEFAULT 1,
-    provider TEXT NOT NULL DEFAULT 'gemini',
-    model_name TEXT NOT NULL DEFAULT 'gemini-2.5-flash',
-    response_time_ms INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_request_logs_guild ON request_logs(guild_id);
-ALTER TABLE request_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow service role full access on request_logs" ON request_logs FOR ALL USING (true);
-
-
+$$;

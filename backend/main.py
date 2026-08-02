@@ -2,25 +2,25 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import asyncio
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
-from backend.routers import chat, model, sandbox, lore, github, media, games, admin
+from backend.logging_config import setup_logging
+from backend.utils.temp_manager import temp_file_manager
 from backend.middleware.rate_limiter import RateLimitMiddleware
+from backend.routers import (
+    chat, model, sandbox, lore, github, media, games, admin,
+    context, xp_router, reminders, moderation
+)
+
+setup_logging()
 
 app = FastAPI(
-    title="Zauq Backend API",
-    description="AgenticEra Hybrid AI Engine for Zauq Discord Bot",
-    version="2.0.0"
+    title="Zauq Backend API Engine",
+    description="AgenticEra Decoupled Hybrid AI Engine for Zauq Discord Bot",
+    version="3.0.0"
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 app.add_middleware(RateLimitMiddleware, guild_limit=30, user_limit=10)
 
 app.include_router(chat.router)
@@ -31,15 +31,22 @@ app.include_router(github.router)
 app.include_router(media.router)
 app.include_router(games.router)
 app.include_router(admin.router)
+app.include_router(context.router)
+app.include_router(xp_router.router)
+app.include_router(reminders.router)
+app.include_router(moderation.router)
 
-
+@app.on_event("startup")
+async def startup_event():
+    # Start temp file manager background cleanup loop
+    asyncio.create_task(temp_file_manager.cleanup_loop())
 
 @app.get("/health")
 async def health_check():
     return {
         "status": "healthy",
         "service": "Zauq Backend",
-        "version": "2.0.0"
+        "version": "3.0.0"
     }
 
 if __name__ == "__main__":

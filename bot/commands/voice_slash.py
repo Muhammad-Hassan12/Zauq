@@ -1,6 +1,4 @@
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
 
 import httpx
 import discord
@@ -49,9 +47,13 @@ class VoiceSlash(commands.Cog):
         voice=[
             app_commands.Choice(name="Christopher (US Male)", value="christopher"),
             app_commands.Choice(name="Ava (US Female)", value="ava"),
-            app_commands.Choice(name="Guy (US Male)", value="guy"),
-            app_commands.Choice(name="Sonia (UK Female)", value="sonia"),
-            app_commands.Choice(name="Brian (UK Male)", value="brian"),
+            app_commands.Choice(name="Asad (Urdu Male)", value="asad"),
+            app_commands.Choice(name="Uzma (Urdu Female)", value="uzma"),
+            app_commands.Choice(name="Madhur (Hindi Male)", value="madhur"),
+            app_commands.Choice(name="Hamed (Arabic Male)", value="hamed"),
+            app_commands.Choice(name="Alvaro (Spanish Male)", value="alvaro"),
+            app_commands.Choice(name="Henri (French Male)", value="henri"),
+            app_commands.Choice(name="Keita (Japanese Male)", value="keita"),
         ]
     )
     async def speak_tts(

@@ -1,4 +1,5 @@
 import time
+import json
 from collections import defaultdict
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -12,11 +13,26 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.window_seconds = window_seconds
         self.guild_requests = defaultdict(list)
         self.user_requests = defaultdict(list)
+        self.last_cleanup = time.time()
+
+    def _cleanup_stale_keys(self, now: float):
+        # Periodically purge empty keys every 5 minutes to prevent memory leak
+        if now - self.last_cleanup > 300:
+            for g_key in list(self.guild_requests.keys()):
+                self.guild_requests[g_key] = [t for t in self.guild_requests[g_key] if now - t < self.window_seconds]
+                if not self.guild_requests[g_key]:
+                    del self.guild_requests[g_key]
+            for u_key in list(self.user_requests.keys()):
+                self.user_requests[u_key] = [t for t in self.user_requests[u_key] if now - t < self.window_seconds]
+                if not self.user_requests[u_key]:
+                    del self.user_requests[u_key]
+            self.last_cleanup = now
 
     def _is_rate_limited(self, requests_dict: dict, key: str, limit: int) -> bool:
         if not key:
             return False
         now = time.time()
+        self._cleanup_stale_keys(now)
         # Filter out timestamps outside window
         requests_dict[key] = [t for t in requests_dict[key] if now - t < self.window_seconds]
         if len(requests_dict[key]) >= limit:
@@ -28,21 +44,29 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Only rate-limit POST requests to /api/chat
         if request.method == "POST" and request.url.path.startswith("/api/chat"):
             try:
-                body = await request.json()
-                guild_id = body.get("guild_id")
-                user_id = body.get("user_id")
+                body_bytes = await request.body()
+                
+                # Re-construct request receive callable so body stream isn't consumed
+                async def receive():
+                    return {"type": "http.request", "body": body_bytes}
+                request = Request(request.scope, receive=receive)
 
-                if self._is_rate_limited(self.guild_requests, guild_id, self.guild_limit):
-                    return JSONResponse(
-                        status_code=429,
-                        content={"detail": "Guild rate limit exceeded (max 30 requests/min). Please try again shortly."}
-                    )
+                if body_bytes:
+                    body = json.loads(body_bytes.decode("utf-8"))
+                    guild_id = body.get("guild_id")
+                    user_id = body.get("user_id")
 
-                if self._is_rate_limited(self.user_requests, user_id, self.user_limit):
-                    return JSONResponse(
-                        status_code=429,
-                        content={"detail": "User rate limit exceeded (max 10 requests/min). Please slow down."}
-                    )
+                    if self._is_rate_limited(self.guild_requests, guild_id, self.guild_limit):
+                        return JSONResponse(
+                            status_code=429,
+                            content={"detail": "Guild rate limit exceeded (max 30 requests/min). Please try again shortly."}
+                        )
+
+                    if self._is_rate_limited(self.user_requests, user_id, self.user_limit):
+                        return JSONResponse(
+                            status_code=429,
+                            content={"detail": "User rate limit exceeded (max 10 requests/min). Please slow down."}
+                        )
 
             except Exception:
                 pass  # If body parsing fails, proceed to endpoint handler
