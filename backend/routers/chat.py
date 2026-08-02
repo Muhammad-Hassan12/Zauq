@@ -102,7 +102,7 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
         if lore_prompt:
             persona += lore_prompt
 
-    # 3. Determine Model Selection
+    # 4. Determine Model Selection
     model_sel = await db_helper.get_model_selection(req.channel_id)
     if model_sel:
         provider = model_sel.get("provider", "gemini")
@@ -111,7 +111,15 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
         provider = "gemini"
         model_name = "gemini-2.5-flash"
 
+    # 5. Enforce strict output guard (prevents Gemma/Open model CoT scratchpad leaks)
+    persona += (
+        "\n\n[CRITICAL OUTPUT DIRECTIVE]: "
+        "Speak DIRECTLY to the user as Zauq. Never output internal thoughts, analysis, draft options, "
+        "reasoning steps, or scratchpad bullet points. Output ONLY your final spoken reply."
+    )
+
     return persona, mode, temp, provider, model_name
+
 
 import base64
 from backend.parsers.file_parser import parse_attachment
