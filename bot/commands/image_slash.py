@@ -15,12 +15,28 @@ class ImageSlash(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="image", description="Generate an AI visual image based on a text prompt")
-    @app_commands.describe(prompt="Description of the image to generate")
-    async def make_image(self, interaction: discord.Interaction, prompt: str):
+    @app_commands.describe(
+        prompt="Description of the image to generate",
+        model="Choose image generation model (DigitalOcean Gradient)"
+    )
+    @app_commands.choices(
+        model=[
+            app_commands.Choice(name="Stable Diffusion 3.5 Large (Default)", value="stable-diffusion-3.5-large"),
+            app_commands.Choice(name="Ideogram 3.0 Turbo", value="ideogram-3.0-turbo")
+        ]
+    )
+    async def make_image(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+        model: app_commands.Choice[str] = None
+    ):
         await interaction.response.defer(thinking=True)
+        selected_model = model.value if model else "stable-diffusion-3.5-large"
 
         payload = {
-            "prompt": prompt
+            "prompt": prompt,
+            "model": selected_model
         }
 
         try:

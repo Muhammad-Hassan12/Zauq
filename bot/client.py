@@ -131,13 +131,30 @@ async def on_message(message: discord.Message):
     if not history_messages:
         history_messages = [{"role": "user", "content": content}]
 
+    # Process Discord attachments (up to 3 files)
+    attachments_payload = []
+    if message.attachments:
+        import base64
+        for att in message.attachments[:3]:
+            try:
+                att_bytes = await att.read()
+                b64_str = base64.b64encode(att_bytes).decode("utf-8")
+                attachments_payload.append({
+                    "filename": att.filename,
+                    "content_type": att.content_type or "",
+                    "bytes_b64": b64_str
+                })
+            except Exception as att_err:
+                print(f"[Bot Warning] Failed to read attachment {att.filename}: {att_err}")
+
     # Send request to FastAPI backend
     chat_payload = {
         "channel_id": str(message.channel.id),
         "guild_id": str(message.guild.id) if message.guild else None,
         "user_id": str(message.author.id),
         "user_name": message.author.name,
-        "messages": history_messages
+        "messages": history_messages,
+        "attachments": attachments_payload
     }
 
     try:

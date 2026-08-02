@@ -60,10 +60,27 @@ class ModelSlash(commands.Cog):
         current: str
     ) -> list[app_commands.Choice[str]]:
         models = [
+            # Google AI Studio - Gemini Family
             "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            # Google AI Studio - Gemma Family
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it",
+            # DigitalOcean Gradient Models
+            "kimi-k3",
+            "glm-5.1",
+            "glm-5.2",
+            "deepseek-v4-pro",
+            "deepseek-4-flash",
+            "qwen3.5-397b-a17b",
             "llama3.3-70b-instruct",
-            "llama3.1-8b-instruct",
-            "mistral-7b-instruct",
+            # Local & Kaggle
             "qwen3.5:4b",
             "qwen3.5-t4"
         ]
@@ -71,6 +88,7 @@ class ModelSlash(commands.Cog):
             app_commands.Choice(name=m, value=m)
             for m in models if current.lower() in m.lower()
         ][:25]
+
 
     @model_group.command(name="set", description="Set model tier and provider for this channel")
     @app_commands.describe(

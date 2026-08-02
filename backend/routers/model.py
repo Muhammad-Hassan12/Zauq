@@ -28,17 +28,41 @@ async def get_model_status(channel_id: str):
 
 from backend.models.router import model_router
 
+@router.get("/gemini-models")
+async def list_gemini_models():
+    """Returns available models from Google AI Studio (Gemini & Gemma families)."""
+    return {
+        "gemini": [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite"
+        ],
+        "gemma": [
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+        ]
+    }
+
 @router.get("/do-models")
 async def list_do_models():
     """Returns available models from DigitalOcean Gradient Serverless Inference."""
     return {
         "models": [
-            "llama3.3-70b-instruct",
-            "llama3.1-8b-instruct",
-            "mistral-7b-instruct",
-            "mixtral-8x7b-instruct"
+            "kimi-k3",
+            "glm-5.1",
+            "glm-5.2",
+            "deepseek-v4-pro",
+            "deepseek-4-flash",
+            "qwen3.5-397b-a17b",
+            "llama3.3-70b-instruct"
         ]
     }
+
 
 @router.post("/set")
 async def set_model_selection(req: ModelSetRequest):

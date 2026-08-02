@@ -59,25 +59,35 @@ Zauq operates in two distinct, per-channel modes configured via `/mode`:
 
 Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit channel locking** (§1.2). Whatever tier is selected serves **every request** for that channel until manually changed.
 
-```
-┌─────────┬──────────────────────────────────┬────────────────────────────────────────────────────────┐
-│ Tier    │ Provider / Engine                │ Details                                                │
-├─────────┼──────────────────────────────────┼────────────────────────────────────────────────────────┤
-│ Tier 1  │ Gemini 2.5 Flash (Default)       │ Cloud Primary (Fast, 1M context window)                │
-│ Tier 1  │ DigitalOcean Gradient            │ Cloud Primary (Serverless `llama3.3-70b-instruct`)    │
-│ Tier 2  │ Local Ollama (`localhost:11434`) │ Local VPS Model (`qwen3.5:4b` - zero API cost)         │
-│ Tier 3  │ Kaggle T4 Tunnel                 │ Cloudflared Tunneled GPU Worker (`qwen3.5-t4`)         │
-└─────────┴──────────────────────────────────┴────────────────────────────────────────────────────────┘
-```
+| Tier | Provider / Engine | Details |
+|---|---|---|
+| Tier 1 | Gemini 2.5 Flash / Pro | Google AI Studio (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3-pro-preview`) |
+| Tier 1 | Gemma Family | Google AI Studio (`gemma-4-26b-a4b-it`, `gemma-4-31b-it`) |
+| Tier 1 | DigitalOcean Gradient | Serverless Inference (`kimi-k3`, `glm-5.1`, `glm-5.2`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `llama3.3-70b-instruct`) |
+| Tier 2 | Local Ollama (`localhost:11434`) | Local VPS Model (`qwen3.5:4b` - zero API cost) |
+| Tier 3 | Kaggle T4 Tunnel | Cloudflared Tunneled GPU Worker (`qwen3.5-t4`) |
 
 #### Model Management Commands:
 ```
 /model status                               -> Check active tier, provider, model, and updater
 /model set tier:1 provider:gemini           -> Lock channel to Gemini 2.5 Flash
-/model set tier:1 provider:digitalocean     -> Lock channel to DigitalOcean (llama3.3-70b-instruct)
+/model set tier:1 provider:gemini model:gemini-2.5-pro -> Lock channel to Gemini 2.5 Pro
+/model set tier:1 provider:digitalocean model:deepseek-v4-pro -> Lock channel to DO DeepSeek v4 Pro
 /model set tier:2 provider:ollama           -> Lock channel to local Ollama qwen3.5:4b
-/model set tier:3 provider:kaggle           -> Lock channel to Kaggle T4 tunnel (pings /health first)
+/model set tier:3 provider:kaggle           -> Lock channel to Kaggle T4 tunnel
 ```
+
+---
+
+## 📄 4. Universal Document & Attachment Ingestion
+
+Zauq automatically reads attached files in Discord without needing separate commands:
+- **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh`
+- **PDF Documents**: `.pdf` (text extracted page-by-page)
+- **Word Documents**: `.docx` (paragraphs and tables extracted)
+- **Spreadsheets**: `.csv`, `.xlsx` (converted into Markdown tables)
+- **Images & Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Multimodal Vision)
+
 
 ---
 

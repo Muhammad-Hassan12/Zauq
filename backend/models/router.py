@@ -1,4 +1,4 @@
-from typing import List, Dict, AsyncGenerator
+from typing import List, Dict, Any, AsyncGenerator, Optional
 from backend.config import settings
 from backend.models.gemini_client import GeminiClient
 from backend.models.openai_compatible_client import OpenAICompatibleClient
@@ -28,16 +28,23 @@ class ModelRouter:
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         provider: str = "gemini",
-        model_name: str = None,
-        system_prompt: str = None,
-        temperature: float = 0.7
+        model_name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        image_parts: Optional[List[Dict[str, str]]] = None
     ) -> str:
         provider = provider.lower()
         if provider == "gemini":
             target_model = model_name or "gemini-2.5-flash"
-            return await self.gemini_client.generate(messages, system_prompt, temperature)
+            return await self.gemini_client.generate(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                image_parts=image_parts
+            )
         elif provider == "digitalocean":
             if not settings.DO_MODEL_ACCESS_KEY:
                 raise ValueError("DigitalOcean Gradient Key (DO_MODEL_ACCESS_KEY) is not configured.")
@@ -57,15 +64,23 @@ class ModelRouter:
 
     async def generate_stream(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         provider: str = "gemini",
-        model_name: str = None,
-        system_prompt: str = None,
-        temperature: float = 0.7
+        model_name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        image_parts: Optional[List[Dict[str, str]]] = None
     ) -> AsyncGenerator[str, None]:
         provider = provider.lower()
         if provider == "gemini":
-            async for chunk in self.gemini_client.generate_stream(messages, system_prompt, temperature):
+            target_model = model_name or "gemini-2.5-flash"
+            async for chunk in self.gemini_client.generate_stream(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                image_parts=image_parts
+            ):
                 yield chunk
         elif provider == "digitalocean":
             if not settings.DO_MODEL_ACCESS_KEY:

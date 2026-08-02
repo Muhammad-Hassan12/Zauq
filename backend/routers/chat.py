@@ -11,6 +11,11 @@ from backend.memory.episodic import extract_and_store_user_memories
 
 router = APIRouter(prefix="/api/chat", tags=["Chat Engine"])
 
+class AttachmentItem(BaseModel):
+    filename: str
+    content_type: Optional[str] = ""
+    bytes_b64: Optional[str] = None
+
 class ChatRequest(BaseModel):
     channel_id: str
     guild_id: Optional[str] = None
@@ -18,6 +23,8 @@ class ChatRequest(BaseModel):
     user_name: Optional[str] = None
     messages: List[Dict[str, str]]
     mode_override: Optional[str] = None
+    attachments: Optional[List[AttachmentItem]] = None
+
 
 class ChannelProfileRequest(BaseModel):
     channel_id: str
@@ -106,6 +113,8 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
 
     return persona, mode, temp, provider, model_name
 
+import base64
+from backend.parsers.file_parser import parse_attachment
 from backend.memory.metrics import log_request_metric
 
 @router.post("")
@@ -113,14 +122,35 @@ async def chat_completion(req: ChatRequest):
     start_time = time.time()
     persona, mode, temp, provider, model_name = await _build_chat_context(req)
 
+    # Process attached files / images
+    image_parts = []
+    if req.attachments and req.messages:
+        attached_text_blocks = []
+        for att in req.attachments:
+            if att.bytes_b64:
+                try:
+                    raw_bytes = base64.b64decode(att.bytes_b64)
+                    parsed = parse_attachment(raw_bytes, att.filename, att.content_type or "")
+                    if parsed["type"] == "image":
+                        image_parts.append(parsed)
+                    else:
+                        attached_text_blocks.append(f"\n\n[Attached Document: {att.filename}]\n{parsed['content']}")
+                except Exception as parse_err:
+                    print(f"[Attachment Warning] Failed to parse attachment {att.filename}: {parse_err}")
+        
+        if attached_text_blocks:
+            req.messages[-1]["content"] += "".join(attached_text_blocks)
+
     try:
         response_text = await model_router.generate(
             messages=req.messages,
             provider=provider,
             model_name=model_name,
             system_prompt=persona,
-            temperature=temp
+            temperature=temp,
+            image_parts=image_parts
         )
+
 
         duration_ms = int((time.time() - start_time) * 1000)
         asyncio.create_task(

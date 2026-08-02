@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -38,20 +39,65 @@ async def create_meme(req: MemeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Meme Error: {str(e)}")
 
+import httpx
+import tempfile
+import base64
+from backend.config import settings
+
 class ImageGenRequest(BaseModel):
     prompt: str
+    model: Optional[str] = "stable-diffusion-3.5-large"
 
 @router.post("/image")
 async def create_image(req: ImageGenRequest):
+    selected_model = req.model or "stable-diffusion-3.5-large"
+    
+    # Try DigitalOcean Gradient Image Generation API if key is present
+    if settings.DO_MODEL_ACCESS_KEY:
+        try:
+            url = "https://inference.do-ai.run/v1/images/generations"
+            headers = {
+                "Authorization": f"Bearer {settings.DO_MODEL_ACCESS_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "prompt": req.prompt,
+                "model": selected_model,
+                "n": 1,
+                "size": "1024x1024"
+            }
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                res = await client.post(url, headers=headers, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    img_item = data.get("data", [{}])[0]
+                    img_url = img_item.get("url")
+                    b64_json = img_item.get("b64_json")
+
+                    temp_path = os.path.join(tempfile.gettempdir(), f"do_art_{os.urandom(4).hex()}.png")
+
+                    if img_url:
+                        img_res = await client.get(img_url)
+                        with open(temp_path, "wb") as f:
+                            f.write(img_res.content)
+                        return FileResponse(temp_path, media_type="image/png", filename="do_image.png")
+                    elif b64_json:
+                        with open(temp_path, "wb") as f:
+                            f.write(base64.b64decode(b64_json))
+                        return FileResponse(temp_path, media_type="image/png", filename="do_image.png")
+        except Exception as do_err:
+            print(f"[Media Note] DO Image Gen fallback: {do_err}")
+
+    # Local PIL Card Renderer Fallback
     try:
-        # Generate card image visualization for prompt
         image_path = generate_meme_image(
-            top_text=f"AI ART: {req.prompt[:30]}",
-            bottom_text=req.prompt[30:80] if len(req.prompt) > 30 else "",
+            top_text=f"AI ART ({selected_model}):",
+            bottom_text=req.prompt[:70],
             bg_color="#0f172a",
             text_color="#38bdf8"
         )
         return FileResponse(image_path, media_type="image/png", filename="ai_image.png")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Image Error: {str(e)}")
+
 
