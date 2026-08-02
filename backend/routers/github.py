@@ -27,8 +27,17 @@ async def get_issue_info(owner: str, repo: str, issue_number: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+ALLOWED_REPOS = [
+    "Muhammad-Hassan12/Zauq",
+    "discord/discord-api-docs",
+]
+
 @router.post("/ingest")
 async def ingest_repo_readme(req: IngestRepoRequest):
+    repo_full_name = f"{req.owner}/{req.repo}"
+    if repo_full_name not in ALLOWED_REPOS:
+        raise HTTPException(status_code=403, detail=f"Repository {repo_full_name} is not whitelisted for ingestion.")
+
     try:
         readme_text = await github_client.get_repo_readme(req.owner, req.repo)
         res = await add_server_lore(req.guild_id, source_type="repo", content=f"Repo {req.owner}/{req.repo} README:\n{readme_text}")

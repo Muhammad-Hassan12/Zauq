@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import asyncio
 import httpx
 import discord
+import base64
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
@@ -117,6 +118,7 @@ async def on_message(message: discord.Message):
 
     # Fetch history context (last 8 messages for optimal context freshness)
     history_messages = []
+    total_history_len = 0
     try:
         async for past_msg in target_channel.history(limit=8, oldest_first=False):
             if past_msg.id == initial_msg.id or past_msg.id == message.id:
@@ -126,6 +128,11 @@ async def on_message(message: discord.Message):
             if msg_text and not msg_text.startswith("💭 *Thinking...*"):
                 if role == "assistant":
                     msg_text = compress_assistant_history(msg_text)
+                
+                if total_history_len + len(msg_text) > 10000:
+                    break # Avoid blowing up context window and memory limits
+                total_history_len += len(msg_text)
+
                 history_messages.append({"role": role, "content": msg_text})
         history_messages.reverse()
     except Exception as e:
@@ -133,15 +140,18 @@ async def on_message(message: discord.Message):
 
 
     # Always guarantee current incoming user message is at the end as role="user"
-    history_messages.append({"role": "user", "content": content})
+    history_messages.append({"role": "user", "content": content[:10000]}) # Limit current msg to 10k too
 
 
     # Process Discord attachments (up to 3 files)
     attachments_payload = []
     if message.attachments:
-        import base64
         for att in message.attachments[:3]:
             try:
+                if att.size > 5 * 1024 * 1024:
+                    print(f"[Bot Warning] Attachment {att.filename} exceeds 5MB limit ({att.size} bytes). Skipping.")
+                    continue
+
                 att_bytes = await att.read()
                 b64_str = base64.b64encode(att_bytes).decode("utf-8")
                 attachments_payload.append({

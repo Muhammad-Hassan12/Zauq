@@ -47,6 +47,7 @@ async def execute_code_docker(code: str, language: str = "python", timeout: floa
         "--network", "none",
         "--memory", "256m",
         "--cpus", "0.5",
+        "--pids-limit", "50",
         image
     ] + cmd
 
@@ -84,58 +85,14 @@ async def execute_code_docker(code: str, language: str = "python", timeout: floa
             "execution_time_ms": 0
         }
 
-async def execute_code_process(code: str, language: str = "python", timeout: float = 5.0) -> Dict[str, Any]:
-    lang = language.lower()
-    start_time = time.time()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        if lang == "python":
-            filepath = os.path.join(tmpdir, "script.py")
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(code)
-            cmd = [sys.executable, filepath]
-        elif lang in ["javascript", "js", "node"]:
-            node_path = shutil.which("node")
-            if not node_path:
-                return {"success": False, "stdout": "", "stderr": "Node.js runtime not found.", "exit_code": 1, "execution_time_ms": 0}
-            filepath = os.path.join(tmpdir, "script.js")
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(code)
-            cmd = [node_path, filepath]
-        elif lang in ["bash", "sh"]:
-            bash_path = shutil.which("bash") or shutil.which("sh")
-            if not bash_path:
-                return {"success": False, "stdout": "", "stderr": "Bash runtime not found.", "exit_code": 1, "execution_time_ms": 0}
-            filepath = os.path.join(tmpdir, "script.sh")
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(code)
-            cmd = [bash_path, filepath]
-        else:
-            return {"success": False, "stdout": "", "stderr": f"Unsupported language '{language}'", "exit_code": 1, "execution_time_ms": 0}
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            return {
-                "success": proc.returncode == 0,
-                "stdout": stdout.decode("utf-8", errors="replace"),
-                "stderr": stderr.decode("utf-8", errors="replace"),
-                "exit_code": proc.returncode,
-                "execution_time_ms": duration_ms
-            }
-        except asyncio.TimeoutError:
-            return {"success": False, "stdout": "", "stderr": f"Execution timed out after {timeout} seconds.", "exit_code": -1, "execution_time_ms": int(timeout * 1000)}
-        except Exception as e:
-            return {"success": False, "stdout": "", "stderr": f"Subprocess error: {str(e)}", "exit_code": 1, "execution_time_ms": 0}
-
 async def execute_code(code: str, language: str = "python", timeout: float = 5.0) -> Dict[str, Any]:
     if await is_docker_available():
         return await execute_code_docker(code, language, timeout)
     else:
-        return await execute_code_process(code, language, timeout)
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": "Code execution failed: Docker sandbox is not available on the host system. For security, direct host execution is disabled.",
+            "exit_code": 1,
+            "execution_time_ms": 0
+        }

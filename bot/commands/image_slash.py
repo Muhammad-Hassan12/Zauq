@@ -46,12 +46,10 @@ class ImageSlash(commands.Cog):
                     await interaction.followup.send(f"⚠️ Image Generation Error: {res.text}")
                     return
 
-                import tempfile
-                temp_img_path = os.path.join(tempfile.gettempdir(), f"discord_image_{os.urandom(4).hex()}.png")
-                with open(temp_img_path, "wb") as f:
-                    f.write(res.content)
+                import io
+                image_bytes = io.BytesIO(res.content)
 
-                discord_file = discord.File(temp_img_path, filename="zauq_ai_art.png")
+                discord_file = discord.File(image_bytes, filename="zauq_ai_art.png")
                 embed = discord.Embed(
                     title="🎨 AI Image Generation",
                     description=f"**Prompt:** *\"{prompt}\"*",
@@ -61,10 +59,6 @@ class ImageSlash(commands.Cog):
                 embed.set_footer(text=f"Requested by @{interaction.user.name}")
 
                 await interaction.followup.send(embed=embed, file=discord_file)
-                try:
-                    os.remove(temp_img_path)
-                except Exception:
-                    pass
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error generating image: {e}")
