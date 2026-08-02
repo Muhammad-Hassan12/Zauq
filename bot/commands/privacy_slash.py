@@ -1,0 +1,61 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
+import httpx
+import discord
+from discord import app_commands
+from discord.ext import commands
+from backend.config import settings
+
+BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+
+class PrivacySlash(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(name="forget", description="Purge all stored episodic memories associated with your User ID")
+    async def purge_my_data(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        user_id = str(interaction.user.id)
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.delete(f"{BACKEND_URL}/api/admin/purge_user_data?user_id={user_id}")
+                if res.status_code != 200:
+                    await interaction.followup.send(f"⚠️ Failed to purge data: {res.text}", ephemeral=True)
+                    return
+
+                data = res.json()
+                count = data.get("deleted_memories_count", 0)
+
+                embed = discord.Embed(
+                    title="🧹 Privacy Data Purge Complete",
+                    description=f"Successfully purged **{count}** stored episodic memory entries associated with your User ID (`{user_id}`).",
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text="Zauq respects user privacy and data retention rights.")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error purging user data: {e}", ephemeral=True)
+
+    @app_commands.command(name="privacy", description="View Zauq privacy disclosure and data handling policies")
+    async def privacy_info(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="🔒 Zauq Privacy & Data Handling Policy",
+            description=(
+                "**Zero Model Training Guarantee:**\n"
+                "Your messages are used strictly for generating real-time responses and managing channel conversation context. "
+                "No user data is ever sent to third parties for model fine-tuning or training.\n\n"
+                "**Data Controls:**\n"
+                "• Use `/forget` at any time to delete all your stored episodic memory facts.\n"
+                "• `/model status` shows which AI provider is serving your channel."
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="AgenticEra Systems — Privacy First AI Architecture")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(PrivacySlash(bot))
