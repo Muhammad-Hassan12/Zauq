@@ -4,7 +4,7 @@ import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Dict, Optional, Any, Literal
 
 from backend.memory.db import db_helper
@@ -34,6 +34,18 @@ class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     mode_override: Optional[str] = None
     attachments: Optional[List[AttachmentItem]] = None
+
+    @field_validator('messages')
+    @classmethod
+    def _validate_messages(cls, v):
+        """Validate message dicts have required role/content structure."""
+        valid_roles = {"user", "assistant", "system"}
+        for i, msg in enumerate(v):
+            if "role" not in msg or "content" not in msg:
+                raise ValueError(f"Message at index {i} must have 'role' and 'content' keys")
+            if msg["role"] not in valid_roles:
+                raise ValueError(f"Message at index {i} has invalid role '{msg['role']}'. Must be one of: {valid_roles}")
+        return v
 
 class ChannelProfileRequest(BaseModel):
     channel_id: str

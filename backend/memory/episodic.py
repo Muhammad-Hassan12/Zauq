@@ -1,8 +1,11 @@
 import asyncio
 import json
+import logging
 from typing import List, Dict, Any
 from backend.memory.db import db_helper
 from backend.models.router import model_router
+
+logger = logging.getLogger("zauq.episodic")
 
 EXTRACTION_SYSTEM_PROMPT = """You are an episodic memory extraction agent.
 Analyze the following conversation transcript and extract any notable personal facts, preferences, background details, technical stack, or project context stated by the user.
@@ -59,7 +62,7 @@ async def extract_and_store_user_memories(
                     category=category,
                     confidence_score=confidence
                 )
-                print(f"[Episodic Memory] Extracted fact for user {user_id}: {fact_str}")
+                logger.info(f"Extracted fact for user {user_id}: {fact_str}")
 
     except Exception as e:
-        print(f"[Episodic Memory Warning] Extraction failed for user {user_id}: {e}")
+        logger.warning(f"Extraction failed for user {user_id}: {e}")

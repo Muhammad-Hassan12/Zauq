@@ -89,7 +89,7 @@ Upload any document or code file directly to Discord! Zauq automatically parses:
 
 ### 🧠 4. 3-Layer Vector Memory Architecture
 * **L1 Working Memory**: 15-message thread context window.
-* **L2 User Episodic Memory (`user_memories`)**: Background worker extracts user facts after every message, storing 3072-dim embeddings via `gemini-embedding-001`.
+* **L2 User Episodic Memory (`user_memories`)**: Background worker extracts user facts after every message, storing 768-dim embeddings via `gemini-embedding-001`.
 * **L3 Server Lore RAG (`server_lore`)**: Supabase `match_server_lore` pgvector similarity search grounds answers in server rules, inside jokes, and ingested GitHub READMEs.
 
 ### ⚙️ 5. Sandboxed Code Execution (`/run`)
@@ -159,7 +159,7 @@ Zauq/
 │   │   └── tts.py                # Edge-TTS Neural Voice Synthesizer
 │   ├── memory/
 │   │   ├── db.py                 # Supabase Client & CRUD Operations
-│   │   ├── embeddings.py         # Gemini 3072-dim Vector Embeddings
+│   │   ├── embeddings.py         # Gemini 768-dim Vector Embeddings
 │   │   ├── episodic.py           # Background User Fact Extraction
 │   │   ├── metrics.py            # Latency & Token Metric Auditing
 │   │   ├── rag.py                # Vector Similarity RAG Search

@@ -1,6 +1,9 @@
+import logging
 from typing import List, Dict, Any
 from backend.memory.db import db_helper
 from backend.memory.embeddings import embedding_client
+
+logger = logging.getLogger("zauq.rag")
 
 async def add_server_lore(guild_id: str, source_type: str, content: str) -> Dict[str, Any]:
     if not db_helper.supabase:
@@ -36,7 +39,7 @@ async def search_server_lore(guild_id: str, query_text: str, top_k: int = 3) -> 
             if rpc_res.data:
                 return rpc_res.data
         except Exception as rpc_err:
-            print(f"[RAG Note] RPC match_server_lore fallback to table query: {rpc_err}")
+            logger.info(f"RPC match_server_lore fallback to table query: {rpc_err}")
 
         # Fallback to direct table query by guild_id
         res = db_helper.supabase.table("server_lore") \
@@ -46,7 +49,7 @@ async def search_server_lore(guild_id: str, query_text: str, top_k: int = 3) -> 
             .execute()
         return res.data or []
     except Exception as e:
-        print(f"[RAG Warning] Failed to query server lore: {e}")
+        logger.warning(f"Failed to query server lore: {e}")
         return []
 
 async def get_lore_context_prompt(guild_id: str, query_text: str) -> str:

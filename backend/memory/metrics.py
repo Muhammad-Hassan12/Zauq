@@ -1,6 +1,9 @@
 import time
+import logging
 from typing import Dict, Any, List, Optional
 from backend.memory.db import db_helper
+
+logger = logging.getLogger("zauq.metrics")
 
 # In-memory metrics fallback buffer
 IN_MEMORY_LOGS: List[Dict[str, Any]] = []
@@ -47,7 +50,7 @@ async def log_request_metric(
             }
             db_helper.supabase.table("request_logs").insert(payload).execute()
         except Exception as e:
-            print(f"[Metrics Warning] Could not persist request log to Supabase: {e}")
+            logger.warning(f"Could not persist request log to Supabase: {e}")
 
 async def get_metrics_summary(guild_id: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -75,7 +78,7 @@ async def get_metrics_summary(guild_id: Optional[str] = None) -> Dict[str, Any]:
                     "source": "supabase"
                 }
         except Exception as e:
-            print(f"[Metrics Note] Supabase metrics fetch fallback: {e}")
+            logger.info(f"Supabase metrics fetch fallback: {e}")
 
     # In-memory buffer fallback
     filtered_logs = [log for log in IN_MEMORY_LOGS if not guild_id or guild_id == "global" or log.get("guild_id") == guild_id]

@@ -1,5 +1,6 @@
 
 
+import os
 import httpx
 import discord
 from discord import app_commands

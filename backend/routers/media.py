@@ -30,7 +30,7 @@ class MemeRequest(BaseModel):
 
 class ImageGenRequest(BaseModel):
     prompt: str
-    model: Optional[str] = "stable-diffusion-3.5-large"
+    model: Optional[str] = "gemini-3.1-flash-image"
 
 @router.post("/tts")
 async def create_tts(req: TTSRequest):

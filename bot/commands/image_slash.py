@@ -18,8 +18,9 @@ class ImageSlash(commands.Cog):
     )
     @app_commands.choices(
         model=[
-            app_commands.Choice(name="Stable Diffusion 3.5 Large (Default)", value="stable-diffusion-3.5-large"),
-            app_commands.Choice(name="Ideogram 3.0 Turbo", value="ideogram-3.0-turbo")
+            app_commands.Choice(name="Gemini Flash Image (Free, Default)", value="gemini-3.1-flash-image"),
+            app_commands.Choice(name="Stable Diffusion 3.5 Large (DO)", value="stable-diffusion-3.5-large"),
+            app_commands.Choice(name="Ideogram 3.0 Turbo (DO)", value="ideogram-3.0-turbo")
         ]
     )
     async def make_image(
@@ -29,7 +30,7 @@ class ImageSlash(commands.Cog):
         model: app_commands.Choice[str] = None
     ):
         await interaction.response.defer(thinking=True)
-        selected_model = model.value if model else "stable-diffusion-3.5-large"
+        selected_model = model.value if model else "gemini-3.1-flash-image"
 
         payload = {
             "prompt": prompt,
