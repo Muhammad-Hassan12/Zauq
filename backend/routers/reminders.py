@@ -1,8 +1,11 @@
 import asyncio
-from fastapi import APIRouter, HTTPException
+import datetime
+import logging
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional, List
 from backend.memory.db import db_helper
+
+logger = logging.getLogger("zauq.reminders")
 
 router = APIRouter(prefix="/api/reminders", tags=["Reminders"])
 
@@ -22,62 +25,22 @@ async def create_reminder(req: CreateReminderRequest):
         raise HTTPException(status_code=400, detail="in_minutes must be between 1 and 10,080 (7 days).")
 
     try:
-        # Calculate remind_at timestamp in Supabase
-        res = await asyncio.to_thread(
-            lambda: db_helper.supabase.rpc(
-                "create_reminder_helper", # Or raw insert with NOW() + interval
-            ).execute() if hasattr(db_helper.supabase, "rpc_create_reminder") else None
-        )
-        
-        # Raw insert
+        remind_dt = (datetime.datetime.utcnow() + datetime.timedelta(minutes=req.in_minutes)).isoformat()
         payload = {
             "guild_id": req.guild_id,
             "channel_id": req.channel_id,
             "user_id": req.user_id,
             "message": req.message,
-            "remind_at": f"now() + interval '{req.in_minutes} minutes'",
+            "remind_at": remind_dt,
             "delivered": False
         }
-
-        # Use supabase insert
         res = await asyncio.to_thread(
-            lambda: db_helper.supabase.table("scheduled_reminders").insert({
-                "guild_id": req.guild_id,
-                "channel_id": req.channel_id,
-                "user_id": req.user_id,
-                "message": req.message,
-                "delivered": False
-            }).execute()
+            lambda: db_helper.supabase.table("scheduled_reminders").insert(payload).execute()
         )
-        
-        # Update remind_at via RPC or post-update
-        if res.data:
-            rem_id = res.data[0]["reminder_id"]
-            await asyncio.to_thread(
-                lambda: db_helper.supabase.rpc("set_reminder_time", {"r_id": rem_id, "mins": req.in_minutes}).execute()
-                if hasattr(db_helper.supabase, "rpc") else None
-            )
-
-        return {"status": "success", "in_minutes": req.in_minutes, "data": res.data[0] if res.data else {}}
+        return {"status": "success", "in_minutes": req.in_minutes, "data": res.data[0] if res.data else payload}
     except Exception as e:
-        # Direct SQL string payload fallback
-        try:
-            import datetime
-            remind_dt = (datetime.datetime.utcnow() + datetime.timedelta(minutes=req.in_minutes)).isoformat()
-            raw_payload = {
-                "guild_id": req.guild_id,
-                "channel_id": req.channel_id,
-                "user_id": req.user_id,
-                "message": req.message,
-                "remind_at": remind_dt,
-                "delivered": False
-            }
-            res = await asyncio.to_thread(
-                lambda: db_helper.supabase.table("scheduled_reminders").insert(raw_payload).execute()
-            )
-            return {"status": "success", "in_minutes": req.in_minutes, "data": res.data[0] if res.data else raw_payload}
-        except Exception as inner_err:
-            raise HTTPException(status_code=500, detail=str(inner_err))
+        logger.error(f"Failed to create reminder: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/pending")
 async def get_pending_reminders():
@@ -85,7 +48,6 @@ async def get_pending_reminders():
         return {"reminders": []}
 
     try:
-        import datetime
         now_str = datetime.datetime.utcnow().isoformat()
         res = await asyncio.to_thread(
             lambda: db_helper.supabase.table("scheduled_reminders")
@@ -97,10 +59,11 @@ async def get_pending_reminders():
         )
         return {"reminders": res.data or []}
     except Exception as e:
+        logger.error(f"Failed to fetch pending reminders: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/mark_delivered")
-async def mark_reminder_delivered(reminder_id: str):
+async def mark_reminder_delivered(reminder_id: str = Query(...)):
     if not db_helper.supabase:
         return {"status": "success"}
 
@@ -113,4 +76,5 @@ async def mark_reminder_delivered(reminder_id: str):
         )
         return {"status": "success", "data": res.data}
     except Exception as e:
+        logger.error(f"Failed to mark reminder as delivered: {e}")
         raise HTTPException(status_code=500, detail=str(e))
