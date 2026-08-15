@@ -10,7 +10,8 @@ from typing import List, Dict, Optional, Any, Literal
 from backend.memory.db import db_helper
 from backend.models.router import model_router
 from backend.memory.episodic import extract_and_store_user_memories
-from backend.parsers.file_parser import parse_attachment
+from backend.parsers.file_parser import parse_attachment, extract_generated_files
+from backend.integrations.web_search import web_search_engine
 from backend.memory.metrics import log_request_metric
 
 logger = logging.getLogger("zauq.chat")
@@ -34,6 +35,7 @@ class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     mode_override: Optional[str] = None
     attachments: Optional[List[AttachmentItem]] = None
+    enable_web_search: Optional[bool] = None
 
     @field_validator('messages')
     @classmethod
@@ -73,15 +75,21 @@ async def update_channel_profile(req: ChannelProfileRequest):
 DEV_PERSONA_SEED = (
     "You are Zauq operating in Dev Mode. You are a senior software engineer and architect. "
     "Be concise, highly technical, and precise. Provide code snippets using proper syntax highlighting. "
-    "Avoid unnecessary conversational filler."
+    "Avoid unnecessary conversational filler. "
+    "You can receive spoken voice notes in Urdu (اردو), English, Hindi, Arabic, or any language—understand them natively and respond accurately. "
+    "When the user asks for a file, script, or complete standalone document (e.g. .py, .md, .json, .sql, .html), "
+    "or when generating a complete standalone project file, wrap the file inside: <zauq_file filename=\"name.ext\">...code...</zauq_file>. "
+    "For standard brief examples, use regular markdown code blocks."
 )
 
 HANGOUT_PERSONA_SEED = (
     "You are Zauq operating in Hangout Mode. You are an expressive, witty, and engaging server companion. "
-    "Match the casual energy of the community while staying helpful, funny, and friendly."
+    "Match the casual energy of the community while staying helpful, funny, and friendly. "
+    "You can receive spoken voice notes in Urdu (اردو), English, Hindi, Arabic, or any language—understand them natively and reply naturally in the matching language. "
+    "When the user asks to generate or export a file, wrap it inside: <zauq_file filename=\"name.ext\">...content...</zauq_file>."
 )
 
-async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, str]:
+async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, str, bool]:
     # 1. Fetch channel profile / guild config
     channel_profile = await db_helper.get_channel_profile(req.channel_id)
     guild_config = await db_helper.get_guild_config(req.guild_id) if req.guild_id else None
@@ -115,9 +123,9 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
             persona += f"\n\n[Known User Facts for @{req.user_name or req.user_id}]:\n{memory_text}"
 
     # 3. Inject RAG Server Lore (L3 Memory)
-    if req.guild_id and req.messages:
+    last_user_query = req.messages[-1].get("content", "") if req.messages else ""
+    if req.guild_id and last_user_query:
         from backend.memory.rag import get_lore_context_prompt
-        last_user_query = req.messages[-1].get("content", "")
         lore_prompt = await get_lore_context_prompt(req.guild_id, last_user_query)
         if lore_prompt:
             persona += lore_prompt
@@ -131,22 +139,29 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
         provider = "gemini"
         model_name = "gemini-2.5-flash"
 
-    # 5. Enforce strict output guard
+    # 5. Determine Search Need
+    enable_search = False
+    if req.enable_web_search is not None:
+        enable_search = req.enable_web_search
+    elif last_user_query and web_search_engine.should_search_web(last_user_query):
+        enable_search = True
+
+    # 6. Enforce strict output guard
     persona += (
         "\n\n[CRITICAL OUTPUT DIRECTIVE]: "
         "Speak DIRECTLY to the user as Zauq. Never output internal thoughts, analysis, draft options, "
         "reasoning steps, or scratchpad bullet points. Output ONLY your final spoken reply."
     )
 
-    return persona, mode, temp, provider, model_name
+    return persona, mode, temp, provider, model_name, enable_search
 
 @router.post("")
 async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
     start_time = time.time()
-    persona, mode, temp, provider, model_name = await _build_chat_context(req)
+    persona, mode, temp, provider, model_name, enable_search = await _build_chat_context(req)
 
-    # Process attached files / images
-    image_parts = []
+    # Process attached files / images / audio voice notes
+    media_parts = []
     if req.attachments and req.messages:
         attached_text_blocks = []
         for att in req.attachments:
@@ -154,8 +169,8 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
                 try:
                     raw_bytes = base64.b64decode(att.bytes_b64)
                     parsed = parse_attachment(raw_bytes, att.filename, att.content_type or "")
-                    if parsed["type"] == "image":
-                        image_parts.append(parsed)
+                    if parsed["type"] in ["image", "audio"]:
+                        media_parts.append(parsed)
                     else:
                         attached_text_blocks.append(f"\n\n[Attached Document: {att.filename}]\n{parsed['content']}")
                 except Exception as parse_err:
@@ -165,15 +180,31 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
             target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
             target_user_msg["content"] += "".join(attached_text_blocks)
 
+    # Detect live URLs in user message and scrape webpage content
+    if req.messages:
+        target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
+        urls = web_search_engine.extract_urls(target_user_msg.get("content", ""))
+        for u in urls[:2]:  # Limit to first 2 URLs
+            try:
+                page_text = await web_search_engine.fetch_url_content(u, max_chars=5000)
+                if page_text and not page_text.startswith("[Failed"):
+                    target_user_msg["content"] += f"\n\n[Attached Live Webpage Content for {u}]:\n{page_text}"
+            except Exception as url_err:
+                logger.info(f"URL scrape failed for {u}: {url_err}")
+
     try:
-        response_text = await model_router.generate(
+        raw_response_text = await model_router.generate(
             messages=req.messages,
             provider=provider,
             model_name=model_name,
             system_prompt=persona,
             temperature=temp,
-            image_parts=image_parts
+            media_parts=media_parts,
+            enable_search=enable_search
         )
+
+        # Extract any generated files from model output (<zauq_file> tags or annotated code blocks)
+        clean_response_text, extracted_files = extract_generated_files(raw_response_text)
 
         duration_ms = int((time.time() - start_time) * 1000)
         background_tasks.add_task(
@@ -184,7 +215,7 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
             background_tasks.add_task(
                 extract_and_store_user_memories,
                 user_id=req.user_id,
-                messages=req.messages + [{"role": "assistant", "content": response_text}],
+                messages=req.messages + [{"role": "assistant", "content": clean_response_text}],
                 provider=provider,
                 model_name=model_name
             )
@@ -193,7 +224,8 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
             "mode": mode,
             "provider": provider,
             "model": model_name,
-            "response": response_text
+            "response": clean_response_text,
+            "files": extracted_files
         }
     except Exception as e:
         logger.error(f"Chat completion error: {e}")
@@ -203,7 +235,19 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
 @router.post("/stream")
 async def chat_completion_stream(req: ChatRequest):
     start_time = time.time()
-    persona, mode, temp, provider, model_name = await _build_chat_context(req)
+    persona, mode, temp, provider, model_name, enable_search = await _build_chat_context(req)
+
+    media_parts = []
+    if req.attachments:
+        for att in req.attachments:
+            if att.bytes_b64:
+                try:
+                    raw_bytes = base64.b64decode(att.bytes_b64)
+                    parsed = parse_attachment(raw_bytes, att.filename, att.content_type or "")
+                    if parsed["type"] in ["image", "audio"]:
+                        media_parts.append(parsed)
+                except Exception:
+                    pass
 
     async def event_generator():
         collected_chunks = []
@@ -213,7 +257,9 @@ async def chat_completion_stream(req: ChatRequest):
                 provider=provider,
                 model_name=model_name,
                 system_prompt=persona,
-                temperature=temp
+                temperature=temp,
+                media_parts=media_parts,
+                enable_search=enable_search
             ):
                 collected_chunks.append(chunk)
                 yield chunk
@@ -224,11 +270,12 @@ async def chat_completion_stream(req: ChatRequest):
             )
 
             full_response = "".join(collected_chunks)
-            if req.user_id and full_response:
+            clean_text, _ = extract_generated_files(full_response)
+            if req.user_id and clean_text:
                 asyncio.create_task(
                     extract_and_store_user_memories(
                         user_id=req.user_id,
-                        messages=req.messages + [{"role": "assistant", "content": full_response}],
+                        messages=req.messages + [{"role": "assistant", "content": clean_text}],
                         provider=provider,
                         model_name=model_name
                     )

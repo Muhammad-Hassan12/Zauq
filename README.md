@@ -81,62 +81,78 @@ Zauq rejects unreliable cascade fallbacks in favor of **explicit channel locking
 * **Tier 2 (Local VPS)**: Local Ollama server (`qwen3.5:4b` - zero API cost).
 * **Tier 3 (Batch GPU)**: Cloudflared tunneled Kaggle T4 worker (`qwen3.5-t4` - pings `/health` before locking).
 
-### 📄 3. Universal Document & File Ingestion
-Upload any document or code file directly to Discord! Zauq automatically parses:
+### 📄 3. Universal Document, Vision & Voice Note Ingestion
+Upload any document, code file, image, or voice note directly to Discord! Zauq automatically parses:
+* **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Gemini 2.5 Flash natively processes raw audio waveforms in **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automated fallback transcriber for open models)
 * **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh`
 * **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf`)
 * **Word Documents**: `.docx` (text and tables extracted via `python-docx`)
 * **Spreadsheets & Data**: `.csv`, `.xlsx` (parsed via `openpyxl` into structured Markdown tables)
 * **Multimodal Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Vision API to analyze screenshots, stack traces, and diagrams)
 
-### 🧠 4. 3-Layer Vector Memory Architecture
+### 📁 4. On-Demand Dynamic File Generation & Project ZIP Bundles (`/file generate`, `/create_file`)
+* **On-Demand File Delivery**: Generates complete, un-truncated `.py`, `.html`, `.json`, `.sql`, `.md`, `.sh`, `.css` files on user demand.
+* **Dual Output Architecture**: Displays an interactive syntax-highlighted code preview directly in chat **and attaches the standalone file as a native Discord attachment (`discord.File`)**.
+* **Automatic Project ZIP Bundling**: When 2 or more files are created simultaneously (e.g. full frontend + backend), Zauq automatically packages them into a `project_files.zip` downloadable archive.
+
+### 🌐 5. Live Internet Access, Web Roaming & URL Scraper (`/search`)
+* **Google Search Grounding**: Gemini models dynamically roam Google Search in real-time, retrieving live facts, sports scores, documentation updates, and formatting clickable markdown citation links.
+* **Universal DuckDuckGo Search**: Open model tiers (DigitalOcean DeepSeek / Ollama) receive live web search context snippets.
+* **Live URL Content Reader**: Drop any HTTP/HTTPS link in chat (e.g. documentation, arXiv papers, news articles) and Zauq will automatically fetch and read the webpage content.
+
+### 🧠 6. 3-Layer Vector Memory Architecture
 * **L1 Working Memory**: 15-message thread context window.
 * **L2 User Episodic Memory (`user_memories`)**: Background worker extracts user facts after every message, storing 768-dim embeddings via `gemini-embedding-001`.
 * **L3 Server Lore RAG (`server_lore`)**: Supabase `match_server_lore` pgvector similarity search grounds answers in server rules, inside jokes, and ingested GitHub READMEs.
 
-### ⚙️ 5. Sandboxed Code Execution (`/run`)
+### ⚙️ 7. Sandboxed Code Execution (`/run`)
 Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 * **Security Constraints**: `--network none` (no internet access), `--memory 256m`, `--cpus 0.5`, 5.0 second execution timeout.
 * **Gated Access**: Restricted to `dev` mode or channels with `allow_code_exec = true`.
 
-### 🔊 6. Free Multi-Language Neural TTS & Voice Companion (`/tts`, `/voice`)
+### 🔊 8. Free Multi-Language Neural TTS & Voice Companion (`/tts`, `/voice`)
 * **Engine**: Microsoft Edge Neural TTS (`edge-tts`). Zero API cost.
 * **19 Voices** across **7 Languages**: English (US/UK), Urdu, Hindi, Arabic, Spanish, French, German, Japanese.
 * **Voice Channel Support**: `/voice join` connects Zauq to voice channels for audio playback.
+* **Voice-to-Voice Companion**: Automatically generates voice note audio responses when voice notes are sent in Hangout mode.
 
-### 🖼️ 7. Free AI Image Generation & Local Meme Rendering (`/image`, `/meme`)
+### 🖼️ 9. Free AI Image Generation & Local Meme Rendering (`/image`, `/meme`)
 * **AI Image Generation (`/image`)**: Primary engine is **Gemini Flash Image** (`gemini-3.1-flash-image`) — **completely free** via existing Gemini API key. Secondary options: DigitalOcean Gradient (`stable-diffusion-3.5-large` & `ideogram-3.0-turbo`).
 * **Local Meme Renderer (`/meme`)**: Local Pillow canvas rendering top/bottom Impact text with outlines.
 
-### 🏆 8. XP & Reputation Leaderboard System
+### 🏆 10. XP & Reputation Leaderboard System
 * **Automated XP**: +1 XP per message, +2 per command, +5 per correct trivia answer.
 * **Leveling Formula**: `Level = floor(sqrt(XP / 100)) + 1`.
 * **Commands**: `/rank` (personal stats), `/leaderboard` (top 10 server members).
 
-### 🛡️ 9. AI Content Moderation
+### 🛡️ 11. AI Content Moderation
 * **AI-Powered**: Uses the active AI model to classify messages as `safe`, `borderline`, or `toxic`.
 * **Auto-Actions**: Toxic messages auto-deleted with DM warning; borderline logged for admin review.
 * **Configurable**: `/moderation enable`, `/moderation sensitivity`, `/moderation log`.
 
-### 🎮 10. Interactive Mini-Games, Reminders & Utilities
+### 🎮 12. Interactive Mini-Games, Reminders & Utilities
 * **Interactive Trivia (`/trivia`)**: Difficulty-tiered mini-game with Discord UI buttons, XP rewards, and server lore questions.
 * **Scheduled Reminders (`/remind`)**: Set reminders from 1 minute to 7 days with automatic delivery.
 * **Conversation Export (`/export`)**: Export thread history as Markdown files.
 * **Thread Summarization (`/summarize`)**: AI-powered bullet-point summaries of discussions.
 * **Privacy & Data Control (`/forget`, `/privacy`)**: GDPR-compliant `/forget` command purges all stored user vector data.
+* **Direct Server Sync (`!sync`)**: Forces instant slash command registration to your server.
 
-### 🔌 11. Plugin Extension System
+### 🔌 13. Plugin Extension System
 * **Auto-Discovery**: Place any `.py` file with an `async def setup(bot)` in `bot/plugins/` — automatically loaded on startup.
 * **Community-Ready**: Build custom slash commands as Discord cogs without modifying core code.
 
 ---
 
-## 📜 Complete Slash Command Reference (21 Commands)
+## 📜 Complete Slash Command Reference (24 Commands)
 
 | Command | Category | Description |
 |---|---|---|
 | `/mode` | Core | Switch channel operating mode (`dev` or `hangout`). |
 | `/summarize` | Core | Summarize thread or channel discussion into bullet points. |
+| `/search` | Search | Search the live internet and get an AI summary with citations. |
+| `/file generate` | File | Generate a complete code or document file on demand. |
+| `/create_file` | File | Quick shortcut to generate a downloadable code or document file. |
 | `/model status` | Models | View current model tier, provider, and model name. |
 | `/model set` | Models | Set channel model tier (1, 2, 3), provider, and model name. |
 | `/run` | Sandbox | Safely execute Python, JS, or Bash code in Docker. |
@@ -162,6 +178,7 @@ Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 | `/stats` | Analytics | View server volume, latency, and provider metrics. |
 | `/forget` | Privacy | Purge stored episodic memories for your User ID. |
 | `/privacy` | Privacy | Display Zauq data privacy disclosure. |
+| `!sync` | Admin | Force instant slash command sync to your Discord server. |
 
 ---
 
@@ -174,7 +191,10 @@ Zauq/
 │   ├── main.py                   # FastAPI Application Entrypoint (Port 8002)
 │   ├── logging_config.py         # Centralized Structured Logging Configuration
 │   ├── games/
-│   │   └── trivia.py             # Server Lore Dynamic Trivia Engine (8+ Questions, 3 Difficulties)
+│   │   └── trivia.py             # Server Lore Dynamic Trivia Engine
+│   ├── integrations/
+│   │   ├── github_client.py      # GitHub PR, Issue & Repo Ingestion Client
+│   │   └── web_search.py         # DuckDuckGo Search, Jina URL Scraper & Citation Engine
 │   ├── media/
 │   │   ├── gemini_image.py       # Gemini Native Image Generation Client (Free)
 │   │   ├── meme_generator.py     # Pillow Text-Overlay Image Renderer
@@ -188,19 +208,20 @@ Zauq/
 │   │   ├── xp.py                 # XP & Reputation System Logic
 │   │   └── schema.sql            # Supabase pgvector Database Schema (9 Tables)
 │   ├── middleware/
-│   │   └── rate_limiter.py       # Sliding-Window Rate Limiting + Body Cache Fix
+│   │   └── rate_limiter.py       # Sliding-Window Rate Limiting
 │   ├── models/
-│   │   ├── gemini_client.py      # Google AI Studio Gemini & Gemma Adapter
+│   │   ├── gemini_client.py      # Google AI Studio Gemini & Gemma Adapter + Google Search Grounding
 │   │   ├── kaggle_client.py      # Tunneled Kaggle GPU Worker Adapter
 │   │   ├── openai_compatible_client.py # DigitalOcean & Ollama Adapter
-│   │   └── router.py             # 3-Tier Explicit Model Router
+│   │   └── router.py             # 3-Tier Explicit Model Router + Search Context & Audio Bridge
 │   ├── moderation/
 │   │   └── content_filter.py     # AI Content Classification (safe/borderline/toxic)
 │   ├── parsers/
-│   │   └── file_parser.py        # PDF, DOCX, XLSX, Text & Vision Parser
+│   │   ├── audio_transcriber.py  # Multilingual Audio Transcriber (Urdu/Hindi/Arabic/English)
+│   │   └── file_parser.py        # PDF, DOCX, XLSX, Vision, Audio & <zauq_file> Parser
 │   ├── routers/
 │   │   ├── admin.py              # Metrics, Memory Stats, XP Leaderboard & Purge Endpoints
-│   │   ├── chat.py               # Chat Completion Engine (Type-Safe, BackgroundTasks)
+│   │   ├── chat.py               # Chat Completion Engine (Type-Safe, Multi-Media, Files)
 │   │   ├── context.py            # Semantic Context Ranking Endpoint
 │   │   ├── games.py              # Trivia Game Generator Endpoint
 │   │   ├── github.py             # GitHub API Integration Endpoints
@@ -214,14 +235,16 @@ Zauq/
 │   ├── sandbox/
 │   │   └── code_runner.py        # Docker Container Subprocess Sandbox
 │   └── utils/
-│       └── temp_manager.py       # Temp File Lifecycle Manager (Auto-Cleanup)
+│       ├── temp_manager.py       # Temp File Lifecycle Manager (Auto-Cleanup)
+│       └── test_new_features.py  # Comprehensive Validation Test Suite
 ├── bot/
-│   ├── client.py                 # Discord.py Gateway Bot, XP Hook, Moderation Hook
+│   ├── client.py                 # Discord.py Gateway Bot, Voice Ingestion, File Delivery, !sync
 │   ├── stream_buffer.py          # Intelligent Multi-Message Chunking (>1900 chars)
 │   ├── commands/
 │   │   ├── admin_slash.py        # /admin memory & /admin channels Commands
 │   │   ├── exec_slash.py         # /run Sandbox Command
 │   │   ├── export_slash.py       # /export Conversation Export Command
+│   │   ├── file_slash.py         # /file generate & /create_file Commands
 │   │   ├── github_slash.py       # /github pr & /github issue Commands
 │   │   ├── image_slash.py        # /image AI Art Command (Gemini + DO)
 │   │   ├── meme_slash.py         # /meme Local Meme Renderer Command
@@ -230,6 +253,7 @@ Zauq/
 │   │   ├── privacy_slash.py      # /forget & /privacy Commands
 │   │   ├── remember_slash.py     # /remember Server Lore Command
 │   │   ├── remind_slash.py       # /remind Scheduled Reminder Command
+│   │   ├── search_slash.py       # /search Web Search Command
 │   │   ├── stats_slash.py        # /stats Analytics Command
 │   │   ├── summarize_slash.py    # /summarize Thread Summary Command
 │   │   ├── trivia_slash.py       # /trivia Interactive Quiz Command

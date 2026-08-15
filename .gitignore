@@ -18,7 +18,9 @@ dist/
 *.egg
 
 # Logs & Temporary Files
+logs/
 *.log
+*.log.*
 /tmp/
 .pytest_cache/
 .coverage

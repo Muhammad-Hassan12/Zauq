@@ -24,6 +24,37 @@ def sanitize_response_output(text: str) -> str:
 
     return text
 
+def format_grounding_citations(text: str, grounding_meta: Optional[Dict[str, Any]]) -> str:
+    """
+    Extracts web search citations from Google Search Grounding metadata
+    and appends clean markdown reference links to the output.
+    """
+    if not grounding_meta:
+        return text
+
+    chunks = grounding_meta.get("groundingChunks", [])
+    if not chunks:
+        return text
+
+    sources = []
+    seen_uris = set()
+
+    for chunk in chunks:
+        web = chunk.get("web", {})
+        uri = web.get("uri")
+        title = web.get("title") or uri
+        if uri and uri not in seen_uris:
+            seen_uris.add(uri)
+            # Truncate title if excessively long
+            clean_title = (title[:60] + "...") if len(title) > 60 else title
+            sources.append(f"• [{clean_title}]({uri})")
+
+    if sources:
+        citations_block = "\n\n🌐 **Web Sources & Grounding:**\n" + "\n".join(sources[:5])
+        return text + citations_block
+
+    return text
+
 class GeminiClient:
     def __init__(self, api_key: str = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
@@ -34,22 +65,29 @@ class GeminiClient:
         messages: List[Dict[str, Any]],
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
-        image_parts: Optional[List[Dict[str, str]]] = None
+        media_parts: Optional[List[Dict[str, str]]] = None,
+        image_parts: Optional[List[Dict[str, str]]] = None,
+        enable_search: bool = False
     ) -> Dict[str, Any]:
         contents = []
+        all_media = (media_parts or []) + (image_parts or [])
+
         for idx, msg in enumerate(messages):
             role = "user" if msg.get("role") in ["user", "system"] else "model"
             parts = [{"text": msg.get("content", "")}]
 
-            # Attach multimodal image parts to the final user message if present
-            if idx == len(messages) - 1 and role == "user" and image_parts:
-                for img in image_parts:
-                    parts.append({
-                        "inlineData": {
-                            "mimeType": img.get("mime_type", "image/png"),
-                            "data": img.get("bytes_b64", "")
-                        }
-                    })
+            # Attach multimodal media parts (Images and Audio) to the final user message
+            if idx == len(messages) - 1 and role == "user" and all_media:
+                for item in all_media:
+                    mime = item.get("mime_type") or ("image/png" if item.get("type") == "image" else "audio/ogg")
+                    b64_data = item.get("bytes_b64", "")
+                    if b64_data:
+                        parts.append({
+                            "inlineData": {
+                                "mimeType": mime,
+                                "data": b64_data
+                            }
+                        })
 
             contents.append({
                 "role": role,
@@ -63,10 +101,16 @@ class GeminiClient:
                 "maxOutputTokens": 4096
             }
         }
+
         if system_prompt:
             payload["systemInstruction"] = {
                 "parts": [{"text": system_prompt}]
             }
+
+        # Google Search Grounding for live internet access
+        if enable_search:
+            payload["tools"] = [{"googleSearch": {}}]
+
         return payload
 
     async def generate(
@@ -75,7 +119,9 @@ class GeminiClient:
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         model_name: Optional[str] = None,
-        image_parts: Optional[List[Dict[str, str]]] = None
+        media_parts: Optional[List[Dict[str, str]]] = None,
+        image_parts: Optional[List[Dict[str, str]]] = None,
+        enable_search: bool = False
     ) -> str:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set in environment.")
@@ -87,20 +133,37 @@ class GeminiClient:
             model_path = target_model.replace("models/", "")
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_path}:generateContent?key={self.api_key}"
-        payload = self._prepare_payload(messages, system_prompt, temperature, image_parts)
+        payload = self._prepare_payload(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            media_parts=media_parts,
+            image_parts=image_parts,
+            enable_search=enable_search
+        )
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(url, json=payload)
             if response.status_code != 200:
-                raise RuntimeError(f"Gemini API Error ({response.status_code}) for model {model_path}: {response.text}")
+                # If Google Search Grounding fails on specific unsupported model, retry without search tool
+                if enable_search and response.status_code == 400:
+                    payload.pop("tools", None)
+                    response = await client.post(url, json=payload)
+
+                if response.status_code != 200:
+                    raise RuntimeError(f"Gemini API Error ({response.status_code}) for model {model_path}: {response.text}")
             
             data = response.json()
             try:
-                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return sanitize_response_output(raw_text)
+                candidate = data["candidates"][0]
+                raw_text = candidate["content"]["parts"][0]["text"]
+                clean_text = sanitize_response_output(raw_text)
+                
+                # Format citations if Google Search Grounding was active
+                grounding_meta = candidate.get("groundingMetadata")
+                return format_grounding_citations(clean_text, grounding_meta)
             except (KeyError, IndexError):
                 raise RuntimeError(f"Unexpected response structure from Gemini API: {data}")
-
 
     async def generate_stream(
         self,
@@ -108,7 +171,9 @@ class GeminiClient:
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         model_name: Optional[str] = None,
-        image_parts: Optional[List[Dict[str, str]]] = None
+        media_parts: Optional[List[Dict[str, str]]] = None,
+        image_parts: Optional[List[Dict[str, str]]] = None,
+        enable_search: bool = False
     ) -> AsyncGenerator[str, None]:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set in environment.")
@@ -120,9 +185,16 @@ class GeminiClient:
             model_path = target_model.replace("models/", "")
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_path}:streamGenerateContent?key={self.api_key}&alt=sse"
-        payload = self._prepare_payload(messages, system_prompt, temperature, image_parts)
+        payload = self._prepare_payload(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            media_parts=media_parts,
+            image_parts=image_parts,
+            enable_search=enable_search
+        )
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             async with client.stream("POST", url, json=payload) as response:
                 if response.status_code != 200:
                     error_text = await response.aread()

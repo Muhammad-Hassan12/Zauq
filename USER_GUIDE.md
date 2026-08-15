@@ -7,23 +7,24 @@
 ## 📐 1. Architecture Overview
 
 Zauq is split into two isolated processes running under PM2:
-1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8002`. Handles AI prompt routing, vector embeddings, memory extraction, code execution sandboxing, media rendering, XP tracking, reminders, and content moderation.
-2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, and 21 slash commands, sending requests to the FastAPI backend.
+1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8002`. Handles AI prompt routing, vector embeddings, memory extraction, code execution sandboxing, web search grounding, media rendering, XP tracking, reminders, and content moderation.
+2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, voice notes, and 24 slash commands, sending requests to the FastAPI backend.
 
 ```
                   ┌─────────────────────────────────────────┐
                   │          Discord Gateway (WS)           │
+                  │  Voice Notes · Attachments · Slash Tree │
                   └────────────────────┬────────────────────┘
                                        │
-                         ┌─────────────▼──────────────┐
-                         │   Zauq Bot (discord.py)    │
-                         │   21 Slash Commands + XP   │
-                         └─────────────┬──────────────┘
+                         ┌─────────────▼─────────────┐
+                         │   Zauq Bot (discord.py)   │
+                         │   24 Slash Commands + XP  │
+                         └─────────────┬─────────────┘
                                        │ HTTP (Port 8002)
                          ┌─────────────▼─────────────┐
                          │   FastAPI Backend Engine  │
                          │  Router · Memory · Media  │
-                         │  Moderation · XP · Tasks  │
+                         │  Search · Files · Sandbox │
                          └──────┬──────────────┬─────┘
                                 │              │
               ┌─────────────────▼───┐      ┌───▼────────────────┐
@@ -45,7 +46,7 @@ Zauq operates in two distinct, per-channel modes configured via `/mode`:
 - **Code Execution**: Enabled by default (`allow_code_exec = true`).
 
 ### 💬 Hangout Mode (`hangout`)
-- **Focus**: Casual server companion, banter, server lore recall, memes, voice TTS, trivia games, and community engagement.
+- **Focus**: Casual server companion, banter, server lore recall, memes, voice TTS, trivia games, voice-to-voice replies, and community engagement.
 - **Temperature**: High (~`0.75`) for expressive, witty, and creative responses.
 - **Persona**: Expressive, funny, and engaging community companion.
 - **Code Execution**: Disabled by default (`allow_code_exec = false`).
@@ -64,7 +65,7 @@ Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit c
 
 | Tier | Provider / Engine | Details |
 |---|---|---|
-| Tier 1 | Gemini 2.5 Flash / Pro | Google AI Studio (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3-pro-preview`) |
+| Tier 1 | Gemini 2.5 Flash / Pro | Google AI Studio (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3-pro-preview`) + Google Search Grounding |
 | Tier 1 | Gemma Family | Google AI Studio (`gemma-4-26b-a4b-it`, `gemma-4-31b-it`) |
 | Tier 1 | DigitalOcean Gradient | Serverless Inference (`kimi-k3`, `glm-5.1`, `glm-5.2`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `llama3.3-70b-instruct`) |
 | Tier 2 | Local Ollama (`localhost:11434`) | Local VPS Model (`qwen3.5:4b` - zero API cost) |
@@ -82,20 +83,41 @@ Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit c
 
 ---
 
-## 📄 4. Universal Document & Attachment Ingestion
+## 📄 4. Universal Document, Vision & Voice Note Ingestion
 
 Zauq automatically reads attached files in Discord without needing separate commands:
+- **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Native Gemini audio waveform ingestion for **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automatic fallback transcriber for open models)
 - **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh`
 - **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf`)
 - **Word Documents**: `.docx` (paragraphs and tables extracted via `python-docx`)
 - **Spreadsheets**: `.csv`, `.xlsx` (converted into Markdown tables via `openpyxl`)
 - **Images & Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Multimodal Vision for screenshot/diagram analysis)
 
-**Usage**: Simply attach a file to your message when mentioning @Zauq. The file is automatically parsed and included in the AI context.
+**Usage**: Simply attach a file or voice note to your message when mentioning @Zauq. The file is automatically parsed and included in the AI context.
 
 ---
 
-## 🧠 5. Memory Architecture (How Zauq Remembers)
+## 📁 5. On-Demand Dynamic File Generation & ZIP Packaging
+
+Zauq features an enterprise file generation engine:
+- **On-Demand Standalone Files**: Ask Zauq to generate any full code or document file (e.g. *"create a landing page in index.html"*, *"generate a FastAPI auth script in auth.py"*, *"make a database schema in schema.sql"*).
+- **Dual Presentation**: Displays an interactive syntax-highlighted code block directly in chat **and uploads the complete, standalone file as a native Discord attachment (`discord.File`)** for 1-click download.
+- **Multi-File ZIP Archives**: If you request multiple files at once (e.g. HTML + CSS + JS or Backend + Dockerfile), Zauq automatically bundles all generated files into an in-memory `project_files.zip` download archive.
+- **Commands**: `/file generate filename:app.py prompt:...` or `/create_file filename:schema.sql prompt:...`.
+
+---
+
+## 🌐 6. Real-Time Web Access, Search Grounding & URL Scraper
+
+Zauq breaks free from model training cutoffs with real-time internet intelligence:
+- **Google Search Grounding**: Tier 1 Gemini models dynamically roam Google Search in real-time to answer questions with the latest news, documentation releases, and live data, appending formatted clickable citation links.
+- **Universal DuckDuckGo Search**: Open model tiers (DigitalOcean DeepSeek / Ollama) receive live search snippets injected directly into their prompt context.
+- **Live URL Content Reader**: Drop any HTTP/HTTPS link in chat (e.g. documentation, arXiv papers, news articles) and Zauq will automatically fetch and read the webpage content using Jina Reader.
+- **Command**: `/search query:<your question>` for dedicated grounded research.
+
+---
+
+## 🧠 7. Memory Architecture (How Zauq Remembers)
 
 Zauq maintains context across 3 distinct memory layers:
 
@@ -116,7 +138,7 @@ Zauq maintains context across 3 distinct memory layers:
 
 ---
 
-## 📜 6. Complete Slash Command Reference (All 21 Commands)
+## 📜 8. Complete Slash Command Reference (All 24 Commands)
 
 ### 🎯 Core Commands
 
@@ -128,6 +150,37 @@ Zauq maintains context across 3 distinct memory layers:
 **`/mode`** — Switches the channel between Dev Mode (technical, low temp) and Hangout Mode (casual, high temp). The mode is saved per-channel and persists across sessions.
 
 **`/summarize`** — Fetches the last 50 messages from the current channel or thread and sends them to the active AI model with a summarization prompt. Returns a clean bullet-point summary embed. Supports `brief` (3-5 bullet points) and `detailed` (comprehensive) modes.
+
+---
+
+### 🌐 Web Intelligence & Live Search Commands
+
+| Command | Description | Usage Example |
+|---|---|---|
+| `/search` | Search the live internet and get a grounded AI summary with citations | `/search query:What are the latest features in Python 3.12?` |
+
+**`/search`** — Uses real-time search engine grounding to retrieve the latest live data from across the web, synthesize an accurate response, and format clean markdown clickable links to original sources.
+
+---
+
+### 📁 File Generation & Export Commands
+
+| Command | Description | Usage Example |
+|---|---|---|
+| `/file generate` | Generate a standalone code or document file on demand | `/file generate filename:app.py prompt:Build a FastAPI CRUD app` |
+| `/create_file` | Quick shortcut to generate a downloadable code or document file | `/create_file filename:schema.sql prompt:Create a PostgreSQL user table` |
+
+**`/file generate` & `/create_file`** — Generates complete, un-truncated code or documentation files. Outputs an interactive syntax-highlighted code block in the Discord chat and attaches the standalone file (`discord.File`) directly below for instant download.
+
+---
+
+### 🔄 Admin Command Synchronization
+
+| Command | Description | Usage Example |
+|---|---|---|
+| `!sync` | Force instant slash command sync to your Discord server | `!sync` |
+
+**`!sync`** — Instantly syncs all 24 slash commands directly to the current Discord server with zero caching or propagation delay.
 
 ---
 
