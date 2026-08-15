@@ -42,13 +42,13 @@ Zauq uses a decoupled architecture to guarantee 99.9% uptime, zero Gateway block
                          ┌────────────────▼────────────────┐
                          │     FastAPI Backend Engine      │
                          │ Router · Memory · Media · Tasks │
-                         └──────┬──────────┬──────────┬────┘
-                                │          │          │
-        ┌───────────────────────▼──┐   ┌───▼───────┐  └─────────────┐
-        │   Supabase pgvector      │   │  Ollama   │   ┌────────────▼────────────┐
-        │(L2 Facts & L3 Server Lore)│   │ (Local VPS)│   │ Isolated Docker Sandbox │
-        └──────────────────────────┘   └───────────┘   │ (Python, Node, Alpine)  │
-                                                       └─────────────────────────┘
+                         └──────┬──────────┬───────────┬────┘
+                                │          │           │
+        ┌───────────────────────▼───┐   ┌───▼───────┐  └─────────────┐
+        │   Supabase pgvector       │   │  Ollama   │   ┌────────────▼────────────┐
+        │(L2 Facts & L3 Server Lore)│   │(Local VPS)│   │ Isolated Docker Sandbox │
+        └───────────────────────────┘   └───────────┘   │ (Python, Node, Alpine)  │
+                                                        └─────────────────────────┘
 ```
 
 ### Detailed Message Processing Sequence
