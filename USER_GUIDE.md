@@ -15,10 +15,10 @@ Zauq is split into two isolated processes running under PM2:
                   │          Discord Gateway (WS)           │
                   └────────────────────┬────────────────────┘
                                        │
-                         ┌─────────────▼─────────────┐
-                         │   Zauq Bot (discord.py)   │
+                         ┌─────────────▼──────────────┐
+                         │   Zauq Bot (discord.py)    │
                          │   21 Slash Commands + XP   │
-                         └─────────────┬─────────────┘
+                         └─────────────┬──────────────┘
                                        │ HTTP (Port 8002)
                          ┌─────────────▼─────────────┐
                          │   FastAPI Backend Engine  │
@@ -27,7 +27,7 @@ Zauq is split into two isolated processes running under PM2:
                          └──────┬──────────────┬─────┘
                                 │              │
               ┌─────────────────▼───┐      ┌───▼────────────────┐
-              │  Supabase pgvector  │      │  Docker Sandbox    │
+              │       pgvector      │      │  Docker Sandbox    │
               │  (Memories & Lore)  │      │  (Python/JS/Bash)  │
               └─────────────────────┘      └────────────────────┘
 ```
