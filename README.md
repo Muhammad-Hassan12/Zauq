@@ -42,7 +42,7 @@ Zauq uses a decoupled architecture to guarantee 99.9% uptime, zero Gateway block
                          ┌────────────────▼────────────────┐
                          │     FastAPI Backend Engine      │
                          │ Router · Memory · Media · Tasks │
-                         └──────┬──────────┬───────────┬────┘
+                         └──────┬──────────┬───────────┬───┘
                                 │          │           │
         ┌───────────────────────▼───┐   ┌───▼───────┐  └─────────────┐
         │   Supabase pgvector       │   │  Ollama   │   ┌────────────▼────────────┐
