@@ -237,15 +237,34 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
                 logger.info(f"URL scrape failed for {u}: {url_err}")
 
     try:
-        raw_response_text = await model_router.generate(
-            messages=req.messages,
-            provider=provider,
-            model_name=model_name,
-            system_prompt=persona,
-            temperature=temp,
-            media_parts=media_parts,
-            enable_search=enable_search
-        )
+        try:
+            raw_response_text = await model_router.generate(
+                messages=req.messages,
+                provider=provider,
+                model_name=model_name,
+                system_prompt=persona,
+                temperature=temp,
+                media_parts=media_parts,
+                enable_search=enable_search
+            )
+        except Exception as prov_err:
+            # If a secondary provider fails (e.g. mismatched model name, offline Ollama/Kaggle),
+            # gracefully fall back to primary Gemini 2.5 Flash to guarantee zero user interruption
+            if provider != "gemini" and settings.GEMINI_API_KEY:
+                logger.warning(f"Provider '{provider}' with model '{model_name}' failed ({prov_err}). Gracefully falling back to Gemini 2.5 Flash.")
+                provider = "gemini"
+                model_name = "gemini-2.5-flash"
+                raw_response_text = await model_router.generate(
+                    messages=req.messages,
+                    provider="gemini",
+                    model_name="gemini-2.5-flash",
+                    system_prompt=persona,
+                    temperature=temp,
+                    media_parts=media_parts,
+                    enable_search=enable_search
+                )
+            else:
+                raise prov_err
 
         # Extract any generated files from model output (<zauq_file> tags or annotated code blocks)
         clean_response_text, extracted_files = extract_generated_files(raw_response_text)
