@@ -67,6 +67,22 @@ Zauq uses a decoupled architecture to guarantee 99.9% uptime, zero Gateway block
 
 ---
 
+## 🛠️ Technology Stack & Infrastructure
+
+| Layer / Category | Technologies & Tools | Description / Role |
+|---|---|---|
+| **Bot & Gateway Client** | `discord.py 2.3+`, `PyNaCl` | Async Discord WebSocket client, voice channels, 25 slash commands & UI buttons |
+| **API Engine & Web Layer** | `FastAPI 0.100+`, `Uvicorn`, `httpx` | High-performance asynchronous REST & SSE backend engine on Port 8002 |
+| **Multi-Tier AI Routing** | `Google Gemini 2.5 Flash/Pro`, `DO Gradient`, `Ollama`, `Kaggle T4` | 3-tier LLM execution with multimodal audio/vision fallbacks & Google search grounding |
+| **Vector Memory & Storage** | `Supabase PostgreSQL`, `pgvector` (768-dim) | 3-layer memory: L1 working context, L2 episodic user facts, L3 server lore RAG |
+| **Execution Sandboxing** | `Docker Engine` (`--network none`, read-only FS) | Ephemeral container sandbox for safe Python, JavaScript, and Bash execution |
+| **Multimodal Document Parsers** | `pypdf`, `python-docx`, `openpyxl`, `Pillow` | Lossless document parsing, table extraction, and local meme rendering |
+| **Neural Voice Synthesis** | `Microsoft Edge Neural TTS (edge-tts)` | Free cloud neural voice synthesis across 19 voices and 7 global languages |
+| **Security & Cryptography** | `HMAC`, `ipaddress`, `socket`, `hashlib` | Constant-time authentication, DNS-resolving SSRF defense, SHA-256 moderation logs |
+| **Process Supervision** | `PM2 Ecosystem`, `Python venv` | Background daemon supervision, reboot recovery, and automated log rotation |
+
+---
+
 ## 🚀 Key Features
 
 ### 🏛️ 1. Hierarchical Configuration & Community Defaults (`scope: "server"` vs `scope: "channel"`)
@@ -334,7 +350,7 @@ docker pull alpine:latest
 ```
 
 ### 4. Database Initialization
-Run the SQL queries in `backend/memory/schema.sql` inside your Supabase SQL Editor to initialize all 9 tables: `channel_profiles`, `model_selections`, `guild_configs`, `user_memories`, `server_lore` (with vector index and RPC function), `request_logs`, `user_stats`, `scheduled_reminders`, and `moderation_log`.
+Run the SQL queries in `backend/memory/schema.sql` inside your Supabase SQL Editor to initialize all 9 tables: `channel_profiles`, `model_selection`, `guild_configs`, `user_memories`, `server_lore` (with vector index and RPC function), `request_logs`, `user_stats`, `scheduled_reminders`, and `moderation_log`.
 
 ### 5. Launch Services with PM2
 ```bash
@@ -354,13 +370,14 @@ curl http://127.0.0.1:8002/health
 
 ## 🔒 Security & Privacy
 
-* **Internal API Authentication**: Shared `X-Zauq-Token` secret validation on all backend endpoints prevents unauthorized local or network access.
-* **Rate Limiting**: Sliding-window rate limit enforces **30 req/min per guild** and **10 req/min per user** to prevent API abuse. Request body properly cached to prevent body consumption bugs.
-* **Sandbox Isolation**: Executed code runs inside non-root Docker containers with zero network access, `--read-only` rootfs, `--security-opt no-new-privileges`, and 256MB RAM caps.
-* **Structured Logging**: All components use Python `logging` with centralized configuration. Logs written to `logs/zauq.log` with rotation.
-* **Async Safety**: All synchronous Supabase calls are wrapped in `asyncio.to_thread()` to prevent event loop blocking.
-* **Data Guarantee**: User message contents are processed in real-time and **never stored or used for third-party model training**.
-* **Right to be Forgotten**: Users can run `/forget` to permanently remove all stored vector facts associated with their Discord ID.
+* **Constant-Time Internal Authentication**: Shared `X-Zauq-Token` secret validation using `hmac.compare_digest()` protects backend endpoints against timing attacks and unauthorized network access.
+* **SSRF-Protected Web Scraping**: URL fetching strictly enforces DNS resolution and IP verification, blocking loopback (`127.0.0.0/8`), private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), and cloud metadata (`169.254.169.254`).
+* **Multi-Tier Rate Limiting**: Sliding-window rate limit enforces **30 req/min per guild** and **10 req/min per user** to prevent API abuse. Request body properly cached to prevent body consumption bugs.
+* **Strict Sandbox Isolation**: Executed code runs inside non-root Docker containers (`nobody` user `65534:65534`) with zero network access (`--network none`), `--read-only` rootfs, `--security-opt no-new-privileges`, 256MB RAM caps, and bounded timeouts.
+* **Row-Level Security (RLS)**: Supabase PostgreSQL tables enforce strict Row-Level Security policies, restricting programmatic access exclusively to the backend service role.
+* **Privacy-Preserving Moderation Logs**: Toxic content is never stored in plaintext; only a SHA-256 cryptographic hash (`[hash:{content_hash}]`) is logged for verification.
+* **Structured Logging & Safety**: All components use Python `logging` with centralized rotation in `logs/zauq.log`. Sensitive HTTP query parameters and secrets are suppressed from logs.
+* **Data Guarantee & Right to be Forgotten**: User messages are processed in real-time and **never stored or used for model training**. Users can run `/forget` at any time to permanently purge their stored episodic memory.
 
 ---
 
