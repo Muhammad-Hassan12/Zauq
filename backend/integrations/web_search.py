@@ -1,10 +1,53 @@
 import re
+import socket
+import ipaddress
 import urllib.parse
 import httpx
 import logging
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("zauq.web_search")
+
+def is_safe_public_url(url: str) -> bool:
+    """
+    Validates that a URL uses http/https and does not resolve to private,
+    loopback, link-local, multicast, or reserved IP ranges (SSRF protection).
+    """
+    if not url:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        # Explicitly block known localhost names
+        if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "local", "metadata.google.internal"):
+            return False
+
+        # Resolve hostname to all associated IPs and verify each
+        addr_info = socket.getaddrinfo(hostname, None)
+        if not addr_info:
+            return False
+
+        for family, _, _, _, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                return False
+        return True
+    except Exception as e:
+        logger.debug(f"URL safety check failed for {url}: {e}")
+        return False
 
 class WebSearchEngine:
     """
@@ -83,10 +126,16 @@ class WebSearchEngine:
         """
         Fetches and extracts clean readable markdown text from a webpage using Jina Reader (free API).
         Fallback to direct text extraction if Jina is unavailable.
+        Strict SSRF validation is enforced before any outbound HTTP request.
         """
         target_url = target_url.strip()
         if not (target_url.startswith("http://") or target_url.startswith("https://")):
             return "[Invalid URL: Must start with http:// or https://]"
+
+        # SSRF Security Check: Verify target URL does not point to internal/private networks
+        if not is_safe_public_url(target_url):
+            logger.warning(f"Blocked potential SSRF access attempt to target: {target_url}")
+            return "[Access Denied: URL resolves to private or restricted network address]"
 
         # Method 1: Jina Reader (https://r.jina.ai/<url>)
         jina_url = f"https://r.jina.ai/{target_url}"
@@ -101,20 +150,33 @@ class WebSearchEngine:
         except Exception as jina_err:
             logger.info(f"Jina reader fallback for {target_url}: {jina_err}")
 
-        # Method 2: Direct HTTP scrape fallback
+        # Method 2: Direct HTTP scrape fallback with safe redirect resolution
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-                res = await client.get(target_url, headers=self.headers)
-                if res.status_code == 200:
-                    # Strip scripts and styles
-                    html = re.sub(r"<(script|style).*?</\1>", "", res.text, flags=re.DOTALL | re.IGNORECASE)
-                    # Strip HTML tags
-                    plain_text = re.sub(r"<[^>]+>", " ", html)
-                    # Clean whitespace
-                    plain_text = re.sub(r"\s+", " ", plain_text).strip()
-                    if len(plain_text) > max_chars:
-                        plain_text = plain_text[:max_chars] + "\n... [Webpage Content Truncated for Length]"
-                    return plain_text if plain_text else "[Webpage contained no readable text]"
+            current_url = target_url
+            for _ in range(3):  # Max 3 redirects
+                if not is_safe_public_url(current_url):
+                    return "[Access Denied: Redirected to restricted network address]"
+
+                async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+                    res = await client.get(current_url, headers=self.headers)
+                    if res.status_code in (301, 302, 303, 307, 308):
+                        location = res.headers.get("Location")
+                        if location:
+                            current_url = urllib.parse.urljoin(current_url, location)
+                            continue
+                        break
+
+                    if res.status_code == 200:
+                        # Strip scripts and styles
+                        html = re.sub(r"<(script|style).*?</\1>", "", res.text, flags=re.DOTALL | re.IGNORECASE)
+                        # Strip HTML tags
+                        plain_text = re.sub(r"<[^>]+>", " ", html)
+                        # Clean whitespace
+                        plain_text = re.sub(r"\s+", " ", plain_text).strip()
+                        if len(plain_text) > max_chars:
+                            plain_text = plain_text[:max_chars] + "\n... [Webpage Content Truncated for Length]"
+                        return plain_text if plain_text else "[Webpage contained no readable text]"
+                    break
         except Exception as e:
             return f"[Failed to fetch webpage content: {str(e)}]"
 

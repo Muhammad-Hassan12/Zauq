@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Literal
 from backend.sandbox.code_runner import execute_code
 from backend.memory.db import db_helper
 
@@ -11,8 +11,8 @@ router = APIRouter(prefix="/api/sandbox", tags=["Code Sandbox"])
 
 class CodeExecRequest(BaseModel):
     code: str
-    language: Optional[str] = "python"
-    timeout: Optional[float] = 5.0
+    language: Optional[Literal["python", "javascript", "node", "js", "bash", "sh"]] = "python"
+    timeout: Optional[float] = Field(default=5.0, ge=1.0, le=30.0)
     channel_id: Optional[str] = None
 
 @router.post("/exec")

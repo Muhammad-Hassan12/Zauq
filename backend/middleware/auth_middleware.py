@@ -1,3 +1,4 @@
+import hmac
 import logging
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -28,7 +29,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         token = request.headers.get("X-Zauq-Token", "")
-        if not token or token != settings.INTERNAL_API_KEY:
+        if not token or not hmac.compare_digest(token, settings.INTERNAL_API_KEY):
             logger.warning(
                 f"Unauthorized request to {request.url.path} "
                 f"from {request.client.host if request.client else 'unknown'}"

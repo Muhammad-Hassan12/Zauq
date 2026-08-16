@@ -7,7 +7,7 @@
 [![Discord.py](https://img.shields.io/badge/Discord.py-2.3%2B-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discordpy.readthedocs.io)
 [![Supabase](https://img.shields.io/badge/Supabase-pgvector-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
 [![Docker](https://img.shields.io/badge/Docker-Sandbox-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=for-the-badge)](https://opensource.org/licenses/Apache-2.0)
 
 *A production-grade, state-of-the-art hybrid AI Discord bot architecture featuring explicit 3-Tier model routing, 3-Layer pgvector memory, universal multi-format document reading, sandboxed Docker code execution, free neural TTS voice synthesis, free AI image generation, XP/reputation gamification, AI content moderation, and interactive Discord UI mini-games.*
 
@@ -204,7 +204,7 @@ Zauq/
 │   │   └── trivia.py             # Server Lore Dynamic Trivia Engine
 │   ├── integrations/
 │   │   ├── github_client.py      # GitHub PR, Issue & Repo Ingestion Client
-│   │   └── web_search.py         # DuckDuckGo Search, Jina URL Scraper & Citation Engine
+│   │   └── web_search.py         # SSRF-Protected Live Web Search, Jina Scraper & Citations
 │   ├── media/
 │   │   ├── gemini_image.py       # Gemini Native Image Generation Client (Free)
 │   │   ├── meme_generator.py     # Pillow Text-Overlay Image Renderer
@@ -216,15 +216,15 @@ Zauq/
 │   │   ├── metrics.py            # Latency & Token Metric Auditing
 │   │   ├── rag.py                # Vector Similarity RAG Search
 │   │   ├── xp.py                 # XP & Reputation System Logic
-│   │   └── schema.sql            # Supabase pgvector Database Schema (9 Tables)
+│   │   └── schema.sql            # Supabase pgvector Database Schema (9 Tables with RLS)
 │   ├── middleware/
-│   │   ├── auth_middleware.py    # Internal API Key Header Authentication
-│   │   └── rate_limiter.py       # Sliding-Window Rate Limiting
+│   │   ├── auth_middleware.py    # Constant-Time Internal API Key Header Authentication
+│   │   └── rate_limiter.py       # Sliding-Window Rate Limiting (Guild, User, IP)
 │   ├── models/
-│   │   ├── gemini_client.py      # Google AI Studio Gemini & Gemma Adapter + Google Search Grounding
+│   │   ├── gemini_client.py      # Google AI Studio Gemini & Gemma Adapter + Grounding
 │   │   ├── kaggle_client.py      # Tunneled Kaggle GPU Worker Adapter
 │   │   ├── openai_compatible_client.py # DigitalOcean & Ollama Adapter
-│   │   └── router.py             # 3-Tier Explicit Model Router + Search Context & Audio Bridge
+│   │   └── router.py             # 3-Tier Explicit Model Router + Multimodal Fallbacks
 │   ├── moderation/
 │   │   └── content_filter.py     # AI Content Classification (safe/borderline/toxic)
 │   ├── parsers/
@@ -232,7 +232,7 @@ Zauq/
 │   │   └── file_parser.py        # PDF, DOCX, XLSX, Vision, Audio & <zauq_file> Parser
 │   ├── routers/
 │   │   ├── admin.py              # Metrics, Memory Stats, XP Leaderboard & Purge Endpoints
-│   │   ├── chat.py               # Chat Completion Engine (Type-Safe, Multi-Media, Files)
+│   │   ├── chat.py               # Chat Completion Engine (Grounded Personas, Multimodal)
 │   │   ├── context.py            # Semantic Context Ranking Endpoint
 │   │   ├── games.py              # Trivia Game Generator Endpoint
 │   │   ├── github.py             # GitHub API Integration Endpoints
@@ -241,26 +241,30 @@ Zauq/
 │   │   ├── model.py              # Model Status, Autocomplete & Set Endpoints
 │   │   ├── moderation.py         # AI Moderation Check, Log & Settings Endpoints
 │   │   ├── reminders.py          # Reminder CRUD & Delivery Endpoints
-│   │   ├── sandbox.py            # Ephemeral Docker Code Execution Router
+│   │   ├── sandbox.py            # Ephemeral Docker Code Execution Router (Bounded Timeouts)
 │   │   └── xp_router.py          # XP Award & Leaderboard Endpoints
 │   ├── sandbox/
-│   │   └── code_runner.py        # Docker Container Subprocess Sandbox
+│   │   └── code_runner.py        # Docker Container Subprocess Sandbox (--network none)
 │   └── utils/
-│       ├── temp_manager.py       # Temp File Lifecycle Manager (Auto-Cleanup)
-│       └── test_new_features.py  # Comprehensive Validation Test Suite
+│       ├── __init__.py           # Package Initializer
+│       ├── temp_manager.py       # Temp File Lifecycle Manager (Auto-Cleanup Worker)
+│       ├── test_community_config.py # Server/Channel Scope & RBAC Test Suite
+│       ├── test_new_features.py  # Feature Validation Test Suite
+│       └── test_security_hardening.py # SSRF, Input Bounds & Auth Security Test Suite
 ├── bot/
 │   ├── api.py                    # Centralized Bot Backend API Client & Auth Headers
+│   ├── auth.py                   # Discord Permission & Upper-Role RBAC Verifier
 │   ├── client.py                 # Discord.py Gateway Bot, Voice Ingestion, File Delivery, !sync
 │   ├── stream_buffer.py          # Intelligent Multi-Message Chunking (>1900 chars)
 │   ├── commands/
-│   │   ├── admin_slash.py        # /admin memory & /admin channels Commands
+│   │   ├── admin_slash.py        # /admin memory, /admin channels & /admin set_role Commands
 │   │   ├── exec_slash.py         # /run Sandbox Command
 │   │   ├── export_slash.py       # /export Conversation Export Command
 │   │   ├── file_slash.py         # /file generate & /create_file Commands
-│   │   ├── github_slash.py       # /github pr & /github issue Commands
+│   │   ├── github_slash.py       # /github pr, /github issue & /ingest_repo Commands
 │   │   ├── image_slash.py        # /image AI Art Command (Gemini + DO)
 │   │   ├── meme_slash.py         # /meme Local Meme Renderer Command
-│   │   ├── model_slash.py        # /model status & /model set Commands
+│   │   ├── model_slash.py        # /model status, /model set & /model reset Commands
 │   │   ├── moderation_slash.py   # /moderation enable, sensitivity & log Commands
 │   │   ├── privacy_slash.py      # /forget & /privacy Commands
 │   │   ├── remember_slash.py     # /remember Server Lore Command
@@ -280,6 +284,7 @@ Zauq/
 ├── USER_GUIDE.md                 # Complete User Manual (v3.0)
 ├── DEPLOYMENT.md                 # Deployment & Infrastructure Guide
 ├── PRIVACY.md                    # Privacy Policy Document
+├── LICENSE                       # Apache License 2.0
 └── README.md                     # Open-Source Project Documentation (v3.0)
 ```
 
@@ -377,6 +382,6 @@ curl http://127.0.0.1:8002/health
 
 ## 📄 License
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **Apache License, Version 2.0** — see the [LICENSE](LICENSE) file for details.
 
 *Built with ❤️ by Syed Muhammad Hassan for the global developer and Discord community.*

@@ -3,11 +3,12 @@ import httpx
 from backend.config import settings
 
 BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+HEADERS = {"X-Zauq-Token": settings.INTERNAL_API_KEY} if settings.INTERNAL_API_KEY else {}
 
 async def run_tests():
     print("🚀 Starting Community Configuration & RBAC Tests...")
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, headers=HEADERS) as client:
         # 1. Test Model Status default
         res = await client.get(f"{BACKEND_URL}/api/model/status?channel_id=test_chan_1&guild_id=test_guild_1")
         assert res.status_code == 200, f"Status failed: {res.text}"
