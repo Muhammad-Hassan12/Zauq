@@ -27,6 +27,7 @@ class OpenAICompatibleClient:
             "model": model,
             "messages": formatted_messages,
             "temperature": temperature,
+            "max_tokens": 8192,
             "stream": False
         }
 
@@ -54,6 +55,7 @@ class OpenAICompatibleClient:
             "model": model,
             "messages": formatted_messages,
             "temperature": temperature,
+            "max_tokens": 8192,
             "stream": True
         }
 

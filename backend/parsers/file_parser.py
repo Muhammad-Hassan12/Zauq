@@ -30,7 +30,7 @@ def parse_pdf(content_bytes: bytes) -> str:
             if text.strip():
                 pages_text.append(f"--- Page {idx + 1} ---\n{text.strip()}")
                 total_len += len(text)
-            if total_len > 12000:
+            if total_len > 120000:
                 pages_text.append("\n... [PDF Content Truncated for Size Limits]")
                 break
         return "\n\n".join(pages_text) if pages_text else "[PDF file contains no extractable text]"
@@ -47,20 +47,20 @@ def parse_docx(content_bytes: bytes) -> str:
             if p.text.strip():
                 output.append(p.text.strip())
                 total_len += len(p.text)
-            if total_len > 12000:
+            if total_len > 120000:
                 break
 
-        if total_len <= 12000:
+        if total_len <= 120000:
             for table_idx, table in enumerate(doc.tables):
                 output.append(f"\n--- Table {table_idx + 1} ---")
                 for row in table.rows:
                     row_cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
                     output.append("| " + " | ".join(row_cells) + " |")
                     total_len += len(" | ".join(row_cells))
-                if total_len > 12000:
+                if total_len > 120000:
                     break
 
-        if total_len > 12000:
+        if total_len > 120000:
              output.append("\n... [Docx Content Truncated for Size Limits]")
 
         return "\n".join(output) if output else "[Docx file contains no text]"
@@ -158,9 +158,9 @@ def parse_attachment(content_bytes: bytes, filename: str, content_type: str = ""
         # Fallback attempt to read as text
         extracted = parse_text(content_bytes)
 
-    # Truncate extremely long document extractions to 12,000 chars to avoid exceeding model prompt windows
-    if len(extracted) > 12000:
-        extracted = extracted[:11900] + "\n... [Document Content Truncated for Prompt Length]"
+    # Truncate extremely long document extractions to 120,000 chars (~30,000 tokens)
+    if len(extracted) > 120000:
+        extracted = extracted[:119900] + "\n... [Document Content Truncated for Prompt Length]"
 
     return {
         "type": "text",
