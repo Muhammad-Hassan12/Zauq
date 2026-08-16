@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -33,11 +34,13 @@ async def check_content(req: ModerationCheckRequest):
 
     if classification != "safe" and db_helper.supabase:
         action = "deleted" if classification == "toxic" else "flagged"
+        # Store only a content hash — never persist raw toxic message text
+        content_hash = hashlib.sha256(req.message_content[:500].encode()).hexdigest()[:32]
         payload = {
             "guild_id": req.guild_id,
             "channel_id": req.channel_id,
             "user_id": req.user_id,
-            "message_content": req.message_content[:500],
+            "message_content": f"[hash:{content_hash}]",
             "action_taken": action,
             "severity": result.get("severity", "low"),
             "reason": result.get("reason", "Automated AI content filter")

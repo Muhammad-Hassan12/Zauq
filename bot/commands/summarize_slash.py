@@ -4,8 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
 from bot.stream_buffer import split_message_chunks
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class SummarizeSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -51,7 +50,7 @@ class SummarizeSlash(commands.Cog):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=45.0) as client:
+            async with api_client(timeout=45.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/chat", json=chat_payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Backend Error: {res.text}")

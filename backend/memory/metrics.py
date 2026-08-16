@@ -48,7 +48,7 @@ async def log_request_metric(
                 "model_name": model_name,
                 "response_time_ms": response_time_ms
             }
-            db_helper.supabase.table("request_logs").insert(payload).execute()
+            await asyncio.to_thread(lambda: db_helper.supabase.table("request_logs").insert(payload).execute())
         except Exception as e:
             logger.warning(f"Could not persist request log to Supabase: {e}")
 

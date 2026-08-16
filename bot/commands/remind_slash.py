@@ -3,8 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class RemindSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -35,7 +34,7 @@ class RemindSlash(commands.Cog):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/reminders/create", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Failed to set reminder: {res.text}")

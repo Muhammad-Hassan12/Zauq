@@ -40,7 +40,7 @@ async def create_reminder(req: CreateReminderRequest):
         return {"status": "success", "in_minutes": req.in_minutes, "data": res.data[0] if res.data else payload}
     except Exception as e:
         logger.error(f"Failed to create reminder: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create reminder.")
 
 @router.get("/pending")
 async def get_pending_reminders():
@@ -60,7 +60,7 @@ async def get_pending_reminders():
         return {"reminders": res.data or []}
     except Exception as e:
         logger.error(f"Failed to fetch pending reminders: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to fetch pending reminders.")
 
 @router.post("/mark_delivered")
 async def mark_reminder_delivered(reminder_id: str = Query(...)):
@@ -77,4 +77,4 @@ async def mark_reminder_delivered(reminder_id: str = Query(...)):
         return {"status": "success", "data": res.data}
     except Exception as e:
         logger.error(f"Failed to mark reminder as delivered: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update reminder status.")

@@ -4,7 +4,6 @@ import zipfile
 import asyncio
 import logging
 import base64
-import httpx
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -12,11 +11,11 @@ from backend.config import settings
 from backend.logging_config import setup_logging
 from bot.stream_buffer import split_message_chunks, compress_assistant_history
 from bot.plugins import load_plugins
+from bot.auth import check_admin_authorization, make_denied_embed
+from bot.api import BACKEND_URL, api_client
 
 setup_logging()
 logger = logging.getLogger("zauq.bot")
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -33,7 +32,7 @@ async def reminder_polling_loop():
     while not bot.is_closed():
         try:
             await asyncio.sleep(30)
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/reminders/pending")
                 if res.status_code == 200:
                     reminders = res.json().get("reminders", [])
@@ -59,33 +58,85 @@ async def reminder_polling_loop():
         except Exception as e:
             logger.error(f"Error in reminder polling loop: {e}")
 
-@bot.tree.command(name="mode", description="Switch channel operating mode (dev | hangout)")
-@app_commands.describe(mode="Operating mode for this channel: 'dev' or 'hangout'")
+@bot.tree.command(name="mode", description="Switch operating mode (channel-specific or permanent community default)")
+@app_commands.describe(
+    mode="Operating mode: Dev (technical, low temp) or Hangout (casual, high temp)",
+    scope="Set for this channel only or as the permanent community server default"
+)
 @app_commands.choices(
     mode=[
-        app_commands.Choice(name="Dev Mode (Technical, low temperature)", value="dev"),
-        app_commands.Choice(name="Hangout Mode (Casual, high temperature)", value="hangout"),
+        app_commands.Choice(name="Dev Mode (Technical, low temperature, code execution enabled)", value="dev"),
+        app_commands.Choice(name="Hangout Mode (Casual, high temperature, creative companion)", value="hangout"),
+    ],
+    scope=[
+        app_commands.Choice(name="Channel (This channel only)", value="channel"),
+        app_commands.Choice(name="Server (Permanent Community Default)", value="server"),
     ]
 )
-async def mode_command(interaction: discord.Interaction, mode: app_commands.Choice[str]):
+async def mode_command(interaction: discord.Interaction, mode: app_commands.Choice[str], scope: app_commands.Choice[str] = None):
     await interaction.response.defer(thinking=True)
+
+    if not await check_admin_authorization(interaction):
+        await interaction.followup.send(embed=make_denied_embed(), ephemeral=True)
+        return
+
     channel_id = str(interaction.channel_id)
     guild_id = str(interaction.guild_id) if interaction.guild_id else "dm"
+    chosen_scope = scope.value if scope else "channel"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with api_client(timeout=10.0) as client:
             payload = {
                 "channel_id": channel_id,
                 "guild_id": guild_id,
+                "scope": chosen_scope,
                 "operating_mode": mode.value
             }
             res = await client.post(f"{BACKEND_URL}/api/chat/profile", json=payload)
             if res.status_code == 200:
-                await interaction.followup.send(f"✅ Channel mode set to **{mode.name}** and saved to channel profile.")
+                if chosen_scope == "server":
+                    embed = discord.Embed(
+                        title="🌐 Community Default Mode Set",
+                        description=f"The entire server **{interaction.guild.name if interaction.guild else ''}** is now permanently set to **{mode.name}**.",
+                        color=discord.Color.gold()
+                    )
+                    embed.set_footer(text="All server channels without specific overrides will inherit this mode.")
+                else:
+                    embed = discord.Embed(
+                        title="📌 Channel Mode Override Set",
+                        description=f"Channel <#{channel_id}> is now locked to **{mode.name}**.",
+                        color=discord.Color.green()
+                    )
+                    embed.set_footer(text="Use '/mode_reset' to revert this channel back to community server defaults.")
+                await interaction.followup.send(embed=embed)
             else:
                 await interaction.followup.send(f"⚠️ Channel mode set to **{mode.name}** (warning: {res.text})")
     except Exception as e:
         await interaction.followup.send(f"❌ Failed to set mode: {e}")
+
+@bot.tree.command(name="mode_reset", description="Clear channel mode override and revert to community server defaults")
+async def mode_reset_command(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+
+    if not await check_admin_authorization(interaction):
+        await interaction.followup.send(embed=make_denied_embed(), ephemeral=True)
+        return
+
+    channel_id = str(interaction.channel_id)
+    try:
+        async with api_client(timeout=10.0) as client:
+            res = await client.post(f"{BACKEND_URL}/api/chat/profile/reset?channel_id={channel_id}")
+            if res.status_code == 200:
+                embed = discord.Embed(
+                    title="🔄 Channel Mode Override Cleared",
+                    description=f"Channel <#{channel_id}> has been reset and will now **inherit the community server default mode**.",
+                    color=discord.Color.teal()
+                )
+                await interaction.followup.send(embed=embed)
+            else:
+                await interaction.followup.send(f"⚠️ Failed to reset channel mode: {res.text}")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error resetting channel mode: {e}")
 
 @bot.command(name="sync")
 async def sync_slash_commands(ctx):
@@ -153,7 +204,7 @@ async def on_ready():
                 logger.warning(f"Guild sync skipped for {g.id}: {g_err}")
 
         # Start reminder polling worker
-        asyncio.create_task(reminder_polling_loop())
+        bot._reminder_task = asyncio.create_task(reminder_polling_loop())
 
     except Exception as e:
         logger.error(f"Failed during bot startup: {e}")
@@ -169,7 +220,7 @@ async def on_message(message: discord.Message):
     # 1. Award XP for message participation
     try:
         guild_id = str(message.guild.id) if message.guild else "dm"
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with api_client(timeout=5.0) as client:
             await client.post(
                 f"{BACKEND_URL}/api/xp/award?user_id={message.author.id}&guild_id={guild_id}&display_name={message.author.display_name}&xp=1&stat_type=message"
             )
@@ -233,7 +284,7 @@ async def on_message(message: discord.Message):
                 "user_id": str(message.author.id),
                 "message_content": content
             }
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with api_client(timeout=5.0) as client:
                 mod_res = await client.post(f"{BACKEND_URL}/api/moderation/check", json=mod_payload)
                 if mod_res.status_code == 200:
                     mod_data = mod_res.json()
@@ -294,7 +345,7 @@ async def on_message(message: discord.Message):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with api_client(timeout=180.0) as client:
             res = await client.post(f"{BACKEND_URL}/api/chat", json=chat_payload)
             if res.status_code != 200:
                 await initial_msg.edit(content=f"❌ Backend Error ({res.status_code}): {res.text}")

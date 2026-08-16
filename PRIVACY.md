@@ -27,7 +27,7 @@ Depending on the model tier explicitly configured for a channel using `/model se
 
 ## 5. User Controls & Data Deletion
 Users have full rights over their stored data:
-- To request deletion of stored episodic memory or facts associated with your Discord User ID, submit a deletion command or contact the bot administrator.
+- To permanently delete all stored episodic memory associated with your Discord User ID, use the **`/forget`** slash command directly in any channel where Zauq is active. This is irreversible and processed immediately.
 - Server administrators can reconfigure or reset channel profiles and stored lore at any time.
 
 ---

@@ -32,16 +32,17 @@ Zauq uses a decoupled architecture to guarantee 99.9% uptime, zero Gateway block
 ```
                     ┌───────────────────────────────────────────┐
                     │            Discord Gateway (WS)           │
+                    │  Voice Notes · Attachments · Slash Tree   │
                     └─────────────────────┬─────────────────────┘
                                           │
                          ┌────────────────▼────────────────┐
                          │     Zauq Bot (discord.py)       │
-                         │  21 Commands · XP · Moderation  │
+                         │   25 Commands · RBAC · XP       │
                          └────────────────┬────────────────┘
                                           │ HTTP (Port 8002)
                          ┌────────────────▼────────────────┐
                          │     FastAPI Backend Engine      │
-                         │ Router · Memory · Media · Tasks │
+                         │ Router · Memory · Media · Search│
                          └──────┬──────────┬───────────┬───┘
                                 │          │           │
         ┌───────────────────────▼───┐   ┌───▼───────┐  └─────────────┐
@@ -52,85 +53,95 @@ Zauq uses a decoupled architecture to guarantee 99.9% uptime, zero Gateway block
 ```
 
 ### Detailed Message Processing Sequence
-1. **Event Capture**: The `discord.py` bot listens for user mentions, thread messages, or attachments.
+1. **Event Capture**: The `discord.py` bot listens for user mentions, thread messages, attachments, or voice notes.
 2. **XP Award**: Awards +1 XP to the user for message activity.
 3. **AI Moderation Check**: If enabled, message is classified by AI content filter before processing.
-4. **Context Window Assembly**: Fetches the last **15 messages** in the current thread/channel.
-5. **Attachment Extraction**: Asynchronously downloads up to 3 attached files (`.pdf`, `.docx`, `.xlsx`, `.csv`, `.py`, `.log`, `.png`) and packages them as base64 payloads.
+4. **Context Window Assembly**: Fetches recent conversational context in the current thread/channel.
+5. **Attachment Extraction**: Asynchronously downloads up to 4 attached files (`.pdf`, `.docx`, `.xlsx`, `.csv`, `.py`, `.png`, `.ogg`, `.mp3`) and packages them as base64 payloads.
 6. **Backend Ingestion (`POST /api/chat`)**:
-   - `file_parser` parses structured text and table data or formats base64 images for Gemini Multimodal Vision.
-   - `db_helper` retrieves L2 user facts (`user_memories`) and L3 server lore vector embeddings (`server_lore` pgvector RPC).
-   - Assembles system persona based on the active operating mode (`dev` vs `hangout`).
-7. **Model Dispatch**: Routes prompt through the explicitly locked channel model tier (Tier 1 Gemini/DO, Tier 2 Ollama, Tier 3 Kaggle).
-8. **Single-Shot Delivery & Auto-Chunking**: Converts model response into clean Discord messages. If output > 1,900 characters, `split_message_chunks()` cleanly splits text at line breaks and code block boundaries (` ``` `) to preserve Markdown formatting.
+   - `file_parser` parses structured text and table data, extracts audio waveforms, or prepares images for Gemini Multimodal Vision.
+   - `db_helper` retrieves L2 user episodic facts and L3 server lore vector embeddings.
+   - Resolves operating mode and model via **Hierarchical Inheritance**: Channel Override $\to$ Community Server Default $\to$ System Fallback.
+7. **Model Dispatch & Fallbacks**: Routes prompt through the active model tier. Automatically performs Gemini Flash Vision OCR and audio transcription fallbacks for text-only model tiers.
+8. **Single-Shot Delivery & Auto-Chunking**: Converts model response into clean Discord messages, delivers downloadable file attachments / ZIP archives, and auto-chunks text over 1,900 characters cleanly.
 
 ---
 
 ## 🚀 Key Features
 
-### 🎭 1. Dual Operating Modes (`/mode`)
+### 🏛️ 1. Hierarchical Configuration & Community Defaults (`scope: "server"` vs `scope: "channel"`)
+* **Community Server Defaults**: Set permanent baseline model tier, provider, and mode across the entire Discord server.
+* **Channel-Specific Overrides**: Lock dedicated channels (e.g. `#dev-chat` to Dev Mode + `gemini-2.5-pro` with code execution, or `#bot-lab` to Ollama) while the rest of the server uses community defaults.
+* **Smart Reset (`/model reset`, `/mode_reset`)**: Easily clear channel overrides to revert back to community server inheritance.
+
+### 🛡️ 2. Role-Based Access Control (RBAC) & Upper-Role Delegation (`/admin set_role`)
+* **Administrator Protection**: Restricts model and operating mode configuration strictly to Server Administrators and members with `Manage Server` permissions.
+* **Upper-Role Authorization (`/admin set_role`)**: Allows server owners to designate a custom moderator/staff role (e.g. `@AI-Admin` or `@Moderator`) with management privileges.
+* **Security Rejection**: Unauthorized users receive a clean security rejection embed.
+
+### 🎭 3. Dual Operating Modes (`/mode`)
 Channels operate in per-channel modes saved to Supabase `channel_profiles`:
 * **Dev Mode (`dev`)**: Technical persona (Senior Architect), low temperature (`0.2`), concise code snippets, and enabled sandboxed code execution (`/run`).
-* **Hangout Mode (`hangout`)**: Casual persona, high temperature (`0.75`), server lore recall, meme rendering, voice TTS, and trivia mini-games.
+* **Hangout Mode (`hangout`)**: Casual persona, high temperature (`0.75`), server lore recall, meme rendering, voice TTS, voice-to-voice replies, and trivia mini-games.
 
-### ⚡ 2. 3-Tier Explicit Model Router
-Zauq rejects unreliable cascade fallbacks in favor of **explicit channel locking**. Channels stay locked to the chosen model provider:
+### ⚡ 4. 3-Tier Explicit Model Router & Clean Provider Taxonomy
+Zauq rejects unreliable cascade fallbacks in favor of **explicit locking**. Channels stay locked to the chosen model provider:
 * **Tier 1 (Cloud Primary)**:
-  * **Google AI Studio (Gemini & Gemma Families)**: `gemini-2.5-flash` (Default), `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-pro-preview`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it`.
-  * **DigitalOcean Gradient Serverless**: `kimi-k3`, `glm-5.1`, `glm-5.2`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `llama3.3-70b-instruct`.
-* **Tier 2 (Local VPS)**: Local Ollama server (`qwen3.5:4b` - zero API cost).
-* **Tier 3 (Batch GPU)**: Cloudflared tunneled Kaggle T4 worker (`qwen3.5-t4` - pings `/health` before locking).
+  * **Google AI Studio (`gemini` / `google`)**: `gemini-2.5-flash` (Default), `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-pro-preview`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it` + Google Search Grounding.
+  * **DigitalOcean Gradient (`digitalocean`)**: `llama3.3-70b-instruct` (Default), `glm-5.2`, `glm-5.1`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `kimi-k3`.
+* **Tier 2 (Local VPS)**: Local Ollama server (`ollama`: `qwen3.5:4b` - zero API cost).
+* **Tier 3 (Batch GPU)**: Cloudflared tunneled Kaggle T4 worker (`kaggle`: `qwen3.5-t4` - pings `/health` before locking).
 
-### 📄 3. Universal Document, Vision & Voice Note Ingestion
+### 📄 5. Universal Document, Vision & Voice Note Ingestion
 Upload any document, code file, image, or voice note directly to Discord! Zauq automatically parses:
-* **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Gemini 2.5 Flash natively processes raw audio waveforms in **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automated fallback transcriber for open models)
+* **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Native Gemini 2.5 Flash audio waveform ingestion for **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automated fallback transcriber for open models)
 * **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh`
 * **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf`)
 * **Word Documents**: `.docx` (text and tables extracted via `python-docx`)
 * **Spreadsheets & Data**: `.csv`, `.xlsx` (parsed via `openpyxl` into structured Markdown tables)
-* **Multimodal Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Vision API to analyze screenshots, stack traces, and diagrams)
+* **Multimodal Vision & OCR Fallback**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Vision or transcribed for text models)
 
-### 📁 4. On-Demand Dynamic File Generation & Project ZIP Bundles (`/file generate`, `/create_file`)
+### 📁 6. On-Demand Dynamic File Generation & Project ZIP Bundles (`/file generate`, `/create_file`)
 * **On-Demand File Delivery**: Generates complete, un-truncated `.py`, `.html`, `.json`, `.sql`, `.md`, `.sh`, `.css` files on user demand.
 * **Dual Output Architecture**: Displays an interactive syntax-highlighted code preview directly in chat **and attaches the standalone file as a native Discord attachment (`discord.File`)**.
 * **Automatic Project ZIP Bundling**: When 2 or more files are created simultaneously (e.g. full frontend + backend), Zauq automatically packages them into a `project_files.zip` downloadable archive.
 
-### 🌐 5. Live Internet Access, Web Roaming & URL Scraper (`/search`)
+### 🌐 7. Live Internet Access, Web Roaming & URL Scraper (`/search`)
 * **Google Search Grounding**: Gemini models dynamically roam Google Search in real-time, retrieving live facts, sports scores, documentation updates, and formatting clickable markdown citation links.
 * **Universal DuckDuckGo Search**: Open model tiers (DigitalOcean DeepSeek / Ollama) receive live web search context snippets.
 * **Live URL Content Reader**: Drop any HTTP/HTTPS link in chat (e.g. documentation, arXiv papers, news articles) and Zauq will automatically fetch and read the webpage content.
 
-### 🧠 6. 3-Layer Vector Memory Architecture
-* **L1 Working Memory**: 15-message thread context window.
+### 🧠 8. 3-Layer Vector Memory Architecture
+* **L1 Working Memory**: 8-message thread context window with intelligent message chunking.
 * **L2 User Episodic Memory (`user_memories`)**: Background worker extracts user facts after every message, storing 768-dim embeddings via `gemini-embedding-001`.
 * **L3 Server Lore RAG (`server_lore`)**: Supabase `match_server_lore` pgvector similarity search grounds answers in server rules, inside jokes, and ingested GitHub READMEs.
 
-### ⚙️ 7. Sandboxed Code Execution (`/run`)
+### ⚙️ 9. Sandboxed Code Execution (`/run`)
 Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 * **Security Constraints**: `--network none` (no internet access), `--memory 256m`, `--cpus 0.5`, 5.0 second execution timeout.
 * **Gated Access**: Restricted to `dev` mode or channels with `allow_code_exec = true`.
 
-### 🔊 8. Free Multi-Language Neural TTS & Voice Companion (`/tts`, `/voice`)
+### 🔊 10. Free Multi-Language Neural TTS & Voice Companion (`/tts`, `/voice`)
 * **Engine**: Microsoft Edge Neural TTS (`edge-tts`). Zero API cost.
 * **19 Voices** across **7 Languages**: English (US/UK), Urdu, Hindi, Arabic, Spanish, French, German, Japanese.
 * **Voice Channel Support**: `/voice join` connects Zauq to voice channels for audio playback.
 * **Voice-to-Voice Companion**: Automatically generates voice note audio responses when voice notes are sent in Hangout mode.
 
-### 🖼️ 9. Free AI Image Generation & Local Meme Rendering (`/image`, `/meme`)
+### 🖼️ 11. Free AI Image Generation & Local Meme Rendering (`/image`, `/meme`)
 * **AI Image Generation (`/image`)**: Primary engine is **Gemini Flash Image** (`gemini-3.1-flash-image`) — **completely free** via existing Gemini API key. Secondary options: DigitalOcean Gradient (`stable-diffusion-3.5-large` & `ideogram-3.0-turbo`).
 * **Local Meme Renderer (`/meme`)**: Local Pillow canvas rendering top/bottom Impact text with outlines.
 
-### 🏆 10. XP & Reputation Leaderboard System
+### 🏆 12. XP & Reputation Leaderboard System
 * **Automated XP**: +1 XP per message, +2 per command, +5 per correct trivia answer.
 * **Leveling Formula**: `Level = floor(sqrt(XP / 100)) + 1`.
 * **Commands**: `/rank` (personal stats), `/leaderboard` (top 10 server members).
 
-### 🛡️ 11. AI Content Moderation
+### 🛡️ 13. AI Content Moderation
 * **AI-Powered**: Uses the active AI model to classify messages as `safe`, `borderline`, or `toxic`.
 * **Auto-Actions**: Toxic messages auto-deleted with DM warning; borderline logged for admin review.
 * **Configurable**: `/moderation enable`, `/moderation sensitivity`, `/moderation log`.
 
-### 🎮 12. Interactive Mini-Games, Reminders & Utilities
+### 🎮 14. Interactive Mini-Games, Reminders & Utilities
 * **Interactive Trivia (`/trivia`)**: Difficulty-tiered mini-game with Discord UI buttons, XP rewards, and server lore questions.
 * **Scheduled Reminders (`/remind`)**: Set reminders from 1 minute to 7 days with automatic delivery.
 * **Conversation Export (`/export`)**: Export thread history as Markdown files.
@@ -138,23 +149,21 @@ Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 * **Privacy & Data Control (`/forget`, `/privacy`)**: GDPR-compliant `/forget` command purges all stored user vector data.
 * **Direct Server Sync (`!sync`)**: Forces instant slash command registration to your server.
 
-### 🔌 13. Plugin Extension System
-* **Auto-Discovery**: Place any `.py` file with an `async def setup(bot)` in `bot/plugins/` — automatically loaded on startup.
-* **Community-Ready**: Build custom slash commands as Discord cogs without modifying core code.
-
 ---
 
-## 📜 Complete Slash Command Reference (24 Commands)
+## 📜 Complete Slash Command Reference (25 Commands)
 
 | Command | Category | Description |
 |---|---|---|
-| `/mode` | Core | Switch channel operating mode (`dev` or `hangout`). |
+| `/mode` | Core | Switch channel or server operating mode (`dev` or `hangout`). |
+| `/mode_reset` | Core | Clear channel mode override and revert to community default. |
 | `/summarize` | Core | Summarize thread or channel discussion into bullet points. |
 | `/search` | Search | Search the live internet and get an AI summary with citations. |
 | `/file generate` | File | Generate a complete code or document file on demand. |
 | `/create_file` | File | Quick shortcut to generate a downloadable code or document file. |
-| `/model status` | Models | View current model tier, provider, and model name. |
-| `/model set` | Models | Set channel model tier (1, 2, 3), provider, and model name. |
+| `/model status` | Models | View active model tier, provider, model name, and inheritance scope. |
+| `/model set` | Models | Set model tier/provider (channel-specific or permanent community default). |
+| `/model reset` | Models | Clear channel model override and revert to community server default. |
 | `/run` | Sandbox | Safely execute Python, JS, or Bash code in Docker. |
 | `/remember` | Lore | Save a server lore fact or rule into vector memory. |
 | `/rank` | XP | Check your XP level, rank, and progress. |
@@ -173,6 +182,7 @@ Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 | `/moderation enable` | Admin | Enable or disable AI content moderation. |
 | `/moderation sensitivity` | Admin | Set AI content filtering sensitivity level. |
 | `/moderation log` | Admin | View recent moderation log entries. |
+| `/admin set_role` | Admin | Designate an upper role with management permissions for Zauq. |
 | `/admin memory` | Admin | View vector memory and API usage statistics. |
 | `/admin channels` | Admin | View channels with configured AI profiles. |
 | `/stats` | Analytics | View server volume, latency, and provider metrics. |
@@ -208,6 +218,7 @@ Zauq/
 │   │   ├── xp.py                 # XP & Reputation System Logic
 │   │   └── schema.sql            # Supabase pgvector Database Schema (9 Tables)
 │   ├── middleware/
+│   │   ├── auth_middleware.py    # Internal API Key Header Authentication
 │   │   └── rate_limiter.py       # Sliding-Window Rate Limiting
 │   ├── models/
 │   │   ├── gemini_client.py      # Google AI Studio Gemini & Gemma Adapter + Google Search Grounding
@@ -238,6 +249,7 @@ Zauq/
 │       ├── temp_manager.py       # Temp File Lifecycle Manager (Auto-Cleanup)
 │       └── test_new_features.py  # Comprehensive Validation Test Suite
 ├── bot/
+│   ├── api.py                    # Centralized Bot Backend API Client & Auth Headers
 │   ├── client.py                 # Discord.py Gateway Bot, Voice Ingestion, File Delivery, !sync
 │   ├── stream_buffer.py          # Intelligent Multi-Message Chunking (>1900 chars)
 │   ├── commands/
@@ -299,6 +311,7 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your_supabase_service_role_key
 BACKEND_HOST=127.0.0.1
 BACKEND_PORT=8002
+INTERNAL_API_KEY=your_random_64_char_hex_secret_here
 ```
 
 ### 2. Create Virtual Environment & Install Dependencies
@@ -336,8 +349,9 @@ curl http://127.0.0.1:8002/health
 
 ## 🔒 Security & Privacy
 
+* **Internal API Authentication**: Shared `X-Zauq-Token` secret validation on all backend endpoints prevents unauthorized local or network access.
 * **Rate Limiting**: Sliding-window rate limit enforces **30 req/min per guild** and **10 req/min per user** to prevent API abuse. Request body properly cached to prevent body consumption bugs.
-* **Sandbox Isolation**: Executed code runs inside non-root Docker containers with zero network access and 256MB RAM caps.
+* **Sandbox Isolation**: Executed code runs inside non-root Docker containers with zero network access, `--read-only` rootfs, `--security-opt no-new-privileges`, and 256MB RAM caps.
 * **Structured Logging**: All components use Python `logging` with centralized configuration. Logs written to `logs/zauq.log` with rotation.
 * **Async Safety**: All synchronous Supabase calls are wrapped in `asyncio.to_thread()` to prevent event loop blocking.
 * **Data Guarantee**: User message contents are processed in real-time and **never stored or used for third-party model training**.

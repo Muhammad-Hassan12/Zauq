@@ -40,18 +40,33 @@ class ChatRequest(BaseModel):
     @field_validator('messages')
     @classmethod
     def _validate_messages(cls, v):
-        """Validate message dicts have required role/content structure."""
+        """Validate message dicts: required fields, valid roles, size limits."""
         valid_roles = {"user", "assistant", "system"}
+        if len(v) > 50:
+            raise ValueError("Too many messages in request. Maximum is 50.")
         for i, msg in enumerate(v):
             if "role" not in msg or "content" not in msg:
                 raise ValueError(f"Message at index {i} must have 'role' and 'content' keys")
             if msg["role"] not in valid_roles:
                 raise ValueError(f"Message at index {i} has invalid role '{msg['role']}'. Must be one of: {valid_roles}")
+            if isinstance(msg["content"], str) and len(msg["content"]) > 15000:
+                raise ValueError(f"Message at index {i} content exceeds maximum length of 15,000 characters.")
+        return v
+
+    @field_validator('attachments')
+    @classmethod
+    def _validate_attachments(cls, v):
+        """Limit attachment count and individual size."""
+        if v is None:
+            return v
+        if len(v) > 4:
+            raise ValueError("Too many attachments. Maximum is 4 per request.")
         return v
 
 class ChannelProfileRequest(BaseModel):
-    channel_id: str
-    guild_id: str
+    channel_id: Optional[str] = None
+    guild_id: Optional[str] = None
+    scope: Optional[str] = "channel"  # 'channel' or 'server'
     operating_mode: str
     temperature: Optional[float] = None
     allow_code_exec: Optional[bool] = None
@@ -61,16 +76,38 @@ async def update_channel_profile(req: ChannelProfileRequest):
     try:
         temp = req.temperature if req.temperature is not None else (0.2 if req.operating_mode == "dev" else 0.75)
         allow_exec = req.allow_code_exec if req.allow_code_exec is not None else (req.operating_mode == "dev")
-        res = await db_helper.upsert_channel_profile(
-            channel_id=req.channel_id,
-            guild_id=req.guild_id,
-            operating_mode=req.operating_mode,
-            temperature=temp,
-            allow_code_exec=allow_exec
-        )
-        return {"status": "success", "data": res}
+        scope = (req.scope or "channel").lower()
+
+        if scope in ["server", "community", "guild"] and req.guild_id and req.guild_id != "dm":
+            res = await db_helper.upsert_guild_config(
+                guild_id=req.guild_id,
+                default_mode=req.operating_mode
+            )
+            return {"status": "success", "scope": "server", "data": res}
+        else:
+            if not req.channel_id:
+                raise HTTPException(status_code=400, detail="channel_id is required for channel-scoped configuration.")
+            res = await db_helper.upsert_channel_profile(
+                channel_id=req.channel_id,
+                guild_id=req.guild_id or "dm",
+                operating_mode=req.operating_mode,
+                temperature=temp,
+                allow_code_exec=allow_exec
+            )
+            return {"status": "success", "scope": "channel", "data": res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/profile/reset")
+async def reset_channel_profile(channel_id: str):
+    """Deletes a channel mode override so the channel inherits the community server default mode."""
+    success = await db_helper.delete_channel_profile(channel_id)
+    return {
+        "status": "success",
+        "channel_id": channel_id,
+        "cleared": success,
+        "detail": "Channel mode override cleared. Channel will now inherit the community server default mode."
+    }
 
 DEV_PERSONA_SEED = (
     "You are Zauq operating in Dev Mode. You are a senior software engineer and architect. "
@@ -94,7 +131,7 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
     channel_profile = await db_helper.get_channel_profile(req.channel_id)
     guild_config = await db_helper.get_guild_config(req.guild_id) if req.guild_id else None
 
-    # Determine mode
+    # Determine mode: Channel Override -> Server Default -> System Default ('hangout')
     mode = req.mode_override
     if not mode and channel_profile:
         mode = channel_profile.get("operating_mode")
@@ -130,11 +167,14 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
         if lore_prompt:
             persona += lore_prompt
 
-    # 4. Determine Model Selection
+    # 4. Determine Model Selection: Channel Override -> Community Default -> System Fallback (Gemini 2.5 Flash)
     model_sel = await db_helper.get_model_selection(req.channel_id)
-    if model_sel:
+    if model_sel and model_sel.get("provider"):
         provider = model_sel.get("provider", "gemini")
         model_name = model_sel.get("model_name", "gemini-2.5-flash")
+    elif guild_config and guild_config.get("default_provider"):
+        provider = guild_config.get("default_provider", "gemini")
+        model_name = guild_config.get("default_model_name", "gemini-2.5-flash")
     else:
         provider = "gemini"
         model_name = "gemini-2.5-flash"
@@ -229,8 +269,7 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
         }
     except Exception as e:
         logger.error(f"Chat completion error: {e}")
-        err_detail = str(e) or repr(e) or "An unexpected model engine error occurred."
-        raise HTTPException(status_code=500, detail=err_detail)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred. Please try again.")
 
 @router.post("/stream")
 async def chat_completion_stream(req: ChatRequest):

@@ -1,5 +1,6 @@
 import logging
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from typing import Optional
 from backend.memory.metrics import get_metrics_summary
 from backend.memory.db import db_helper
@@ -7,6 +8,26 @@ from backend.memory.db import db_helper
 logger = logging.getLogger("zauq.admin")
 
 router = APIRouter(prefix="/api/admin", tags=["Admin & Privacy"])
+
+@router.get("/config")
+async def get_admin_config(guild_id: str):
+    """Returns guild configuration including admin_role_id and default models."""
+    if not guild_id or guild_id == "dm":
+        return {}
+    config = await db_helper.get_guild_config(guild_id)
+    return config or {}
+
+class SetRoleRequest(BaseModel):
+    guild_id: str
+    role_id: Optional[str] = None
+
+@router.post("/set_role")
+async def set_admin_role(req: SetRoleRequest):
+    """Sets or clears the designated admin/staff role for Zauq management."""
+    if not req.guild_id or req.guild_id == "dm":
+        raise HTTPException(status_code=400, detail="Valid guild_id is required.")
+    res = await db_helper.upsert_guild_config(guild_id=req.guild_id, admin_role_id=req.role_id)
+    return {"status": "success", "guild_id": req.guild_id, "admin_role_id": req.role_id, "data": res}
 
 @router.get("/metrics")
 async def get_metrics(guild_id: Optional[str] = Query(None)):
@@ -25,7 +46,9 @@ async def purge_user_data(user_id: str):
         return {"status": "success", "message": "No database attached. Nothing to delete."}
 
     try:
-        res = db_helper.supabase.table("user_memories").delete().eq("user_id", user_id).execute()
+        res = await asyncio.to_thread(
+            lambda: db_helper.supabase.table("user_memories").delete().eq("user_id", user_id).execute()
+        )
         count = len(res.data) if res.data else 0
         return {
             "status": "success",
@@ -33,7 +56,8 @@ async def purge_user_data(user_id: str):
             "deleted_memories_count": count
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Purge Error: {str(e)}")
+        logger.error(f"Purge error for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to purge user data. Please try again.")
 
 @router.get("/memory_stats")
 async def memory_stats(guild_id: Optional[str] = Query(None)):

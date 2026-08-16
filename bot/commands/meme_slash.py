@@ -1,12 +1,10 @@
 
-
 import httpx
 import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class MemeSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -37,7 +35,7 @@ class MemeSlash(commands.Cog):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with api_client(timeout=15.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/media/meme", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Meme generation error: {res.text}")

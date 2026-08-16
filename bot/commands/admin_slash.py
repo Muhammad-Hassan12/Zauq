@@ -3,8 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class AdminSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -19,7 +18,7 @@ class AdminSlash(commands.Cog):
         guild_id = str(interaction.guild_id) if interaction.guild_id else "global"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/admin/memory_stats?guild_id={guild_id}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Error fetching memory stats: {res.text}", ephemeral=True)
@@ -53,7 +52,7 @@ class AdminSlash(commands.Cog):
         guild_id = str(interaction.guild_id) if interaction.guild_id else "global"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/admin/active_channels?guild_id={guild_id}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Error fetching channels: {res.text}", ephemeral=True)
@@ -86,6 +85,42 @@ class AdminSlash(commands.Cog):
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error querying active channels: {e}", ephemeral=True)
+
+    @admin_group.command(name="set_role", description="Designate an upper role with management permissions for Zauq")
+    @app_commands.describe(role="Discord role to grant management permissions (leave empty to clear)")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_admin_role(self, interaction: discord.Interaction, role: discord.Role = None):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        if not interaction.guild:
+            await interaction.followup.send("⚠️ This command can only be used within a server.", ephemeral=True)
+            return
+
+        guild_id = str(interaction.guild.id)
+        role_id = str(role.id) if role else None
+        role_name = role.name if role else "None"
+
+        try:
+            async with api_client(timeout=10.0) as client:
+                payload = {"guild_id": guild_id, "role_id": role_id}
+                res = await client.post(f"{BACKEND_URL}/api/admin/set_role", json=payload)
+                if res.status_code == 200:
+                    if role:
+                        embed = discord.Embed(
+                            title="🛡️ Admin Role Configured",
+                            description=f"Members with the role <@&{role_id}> (**{role_name}**) are now authorized to configure Zauq models, modes, and settings.",
+                            color=discord.Color.green()
+                        )
+                    else:
+                        embed = discord.Embed(
+                            title="🛡️ Admin Role Cleared",
+                            description="Custom admin role has been cleared. Only members with standard Discord **Administrator** permissions can configure Zauq.",
+                            color=discord.Color.gold()
+                        )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await interaction.followup.send(f"⚠️ Failed to update admin role: {res.text}", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error setting admin role: {e}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminSlash(bot))

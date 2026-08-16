@@ -8,7 +8,7 @@
 
 Zauq is split into two isolated processes running under PM2:
 1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8002`. Handles AI prompt routing, vector embeddings, memory extraction, code execution sandboxing, web search grounding, media rendering, XP tracking, reminders, and content moderation.
-2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, voice notes, and 24 slash commands, sending requests to the FastAPI backend.
+2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, voice notes, and 25 slash commands, sending requests to the FastAPI backend.
 
 ```
                   ┌─────────────────────────────────────────┐
@@ -18,7 +18,7 @@ Zauq is split into two isolated processes running under PM2:
                                        │
                          ┌─────────────▼─────────────┐
                          │   Zauq Bot (discord.py)   │
-                         │   24 Slash Commands + XP  │
+                         │   25 Slash Commands + XP  │
                          └─────────────┬─────────────┘
                                        │ HTTP (Port 8002)
                          ┌─────────────▼─────────────┐
@@ -28,7 +28,7 @@ Zauq is split into two isolated processes running under PM2:
                          └──────┬──────────────┬─────┘
                                 │              │
               ┌─────────────────▼───┐      ┌───▼────────────────┐
-              │       pgvector      │      │  Docker Sandbox    │
+              │  Supabase pgvector  │      │  Docker Sandbox    │
               │  (Memories & Lore)  │      │  (Python/JS/Bash)  │
               └─────────────────────┘      └────────────────────┘
 ```
@@ -37,7 +37,7 @@ Zauq is split into two isolated processes running under PM2:
 
 ## 🎭 2. Operating Modes & Persona Configuration
 
-Zauq operates in two distinct, per-channel modes configured via `/mode`:
+Zauq operates in two distinct modes configured via `/mode` at either **Channel** or **Server** scope:
 
 ### 🛠️ Dev Mode (`dev`)
 - **Focus**: Technical assistance, code reviews, stack trace analysis, and sandboxed code execution.
@@ -51,34 +51,33 @@ Zauq operates in two distinct, per-channel modes configured via `/mode`:
 - **Persona**: Expressive, funny, and engaging community companion.
 - **Code Execution**: Disabled by default (`allow_code_exec = false`).
 
-#### Switch Channel Mode Command:
+#### Operating Mode Commands:
 ```
-/mode mode:dev        -> Locks channel to Dev Mode (low temp, technical)
-/mode mode:hangout    -> Locks channel to Hangout Mode (casual, high temp)
+/mode mode:dev scope:Server      -> Sets entire community default to Dev Mode
+/mode mode:hangout scope:Channel -> Locks current channel to Hangout Mode
+/mode_reset                      -> Clears channel override and reverts to community default
 ```
 
 ---
 
-## ⚡ 3. Explicit Model Tier Routing Engine
+## ⚡ 3. Explicit Model Tier Routing Engine & Clean Taxonomy
 
-Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit channel locking**. Whatever tier is selected serves **every request** for that channel until manually changed.
+Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit locking**. Whatever tier and provider is selected serves **every request** for that channel or server until changed.
 
-| Tier | Provider / Engine | Details |
-|---|---|---|
-| Tier 1 | Gemini 2.5 Flash / Pro | Google AI Studio (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3-pro-preview`) + Google Search Grounding |
-| Tier 1 | Gemma Family | Google AI Studio (`gemma-4-26b-a4b-it`, `gemma-4-31b-it`) |
-| Tier 1 | DigitalOcean Gradient | Serverless Inference (`kimi-k3`, `glm-5.1`, `glm-5.2`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `llama3.3-70b-instruct`) |
-| Tier 2 | Local Ollama (`localhost:11434`) | Local VPS Model (`qwen3.5:4b` - zero API cost) |
-| Tier 3 | Kaggle T4 Tunnel | Cloudflared Tunneled GPU Worker (`qwen3.5-t4`) |
+| Tier | Provider Identifier | Display Name | Supported Models |
+|---|---|---|---|
+| Tier 1 | `gemini` (alias `google`) | Google AI Studio | `gemini-2.5-flash` (Default), `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-pro-preview`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it` + Google Search Grounding |
+| Tier 1 | `digitalocean` | DigitalOcean Gradient | `llama3.3-70b-instruct` (Default), `glm-5.2`, `glm-5.1`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `kimi-k3` |
+| Tier 2 | `ollama` | Local VPS Model | `qwen3.5:4b` (zero API cost) |
+| Tier 3 | `kaggle` | Kaggle T4 Tunnel | `qwen3.5-t4` (pings `/health` before locking) |
 
 #### Model Management Commands:
 ```
-/model status                               -> Check active tier, provider, model, and updater
-/model set tier:1 provider:gemini           -> Lock channel to Gemini 2.5 Flash
-/model set tier:1 provider:gemini model:gemini-2.5-pro -> Lock channel to Gemini 2.5 Pro
-/model set tier:1 provider:digitalocean model:deepseek-v4-pro -> Lock channel to DO DeepSeek v4 Pro
-/model set tier:2 provider:ollama           -> Lock channel to local Ollama qwen3.5:4b
-/model set tier:3 provider:kaggle           -> Lock channel to Kaggle T4 tunnel
+/model status                               -> Check active tier, provider, model name, and inheritance scope
+/model set tier:1 provider:gemini scope:Server -> Lock entire community default to Google Gemini 2.5 Flash
+/model set tier:1 provider:gemini model:gemini-2.5-pro scope:Channel -> Lock specific channel to Gemini 2.5 Pro
+/model set tier:1 provider:digitalocean model:glm-5.2 -> Lock channel to DigitalOcean GLM-5.2
+/model reset                                -> Clears channel override and reverts to community server default
 ```
 
 ---
@@ -91,7 +90,7 @@ Zauq automatically reads attached files in Discord without needing separate comm
 - **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf`)
 - **Word Documents**: `.docx` (paragraphs and tables extracted via `python-docx`)
 - **Spreadsheets**: `.csv`, `.xlsx` (converted into Markdown tables via `openpyxl`)
-- **Images & Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Multimodal Vision for screenshot/diagram analysis)
+- **Images & Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Multimodal Vision, or automatically transcribed via Gemini Flash OCR fallback for text-only models like GLM/DeepSeek)
 
 **Usage**: Simply attach a file or voice note to your message when mentioning @Zauq. The file is automatically parsed and included in the AI context.
 
@@ -138,49 +137,21 @@ Zauq maintains context across 3 distinct memory layers:
 
 ---
 
-## 📜 8. Complete Slash Command Reference (All 24 Commands)
+## 📜 8. Complete Slash Command Reference (All 25 Commands)
 
-### 🎯 Core Commands
+### 🎯 Core & Mode Commands
 
 | Command | Description | Usage Example |
 |---|---|---|
-| `/mode` | Switch channel operating mode | `/mode mode:dev` or `/mode mode:hangout` |
+| `/mode` | Switch channel or community server operating mode | `/mode mode:dev scope:Server` or `/mode mode:hangout` |
+| `/mode_reset` | Clear channel mode override and revert to community default | `/mode_reset` |
 | `/summarize` | Summarize the current thread/channel into bullet points | `/summarize length:brief` or `/summarize length:detailed` |
 
-**`/mode`** — Switches the channel between Dev Mode (technical, low temp) and Hangout Mode (casual, high temp). The mode is saved per-channel and persists across sessions.
+**`/mode`** — Switches operating mode between Dev Mode (technical, low temp) and Hangout Mode (casual, high temp). Supports `scope: Channel` (affects current channel only) or `scope: Server` (sets permanent community default for all unconfigured channels). Requires administrator or authorized role.
+
+**`/mode_reset`** — Clears a channel's mode override so it inherits the community server default mode.
 
 **`/summarize`** — Fetches the last 50 messages from the current channel or thread and sends them to the active AI model with a summarization prompt. Returns a clean bullet-point summary embed. Supports `brief` (3-5 bullet points) and `detailed` (comprehensive) modes.
-
----
-
-### 🌐 Web Intelligence & Live Search Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/search` | Search the live internet and get a grounded AI summary with citations | `/search query:What are the latest features in Python 3.12?` |
-
-**`/search`** — Uses real-time search engine grounding to retrieve the latest live data from across the web, synthesize an accurate response, and format clean markdown clickable links to original sources.
-
----
-
-### 📁 File Generation & Export Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/file generate` | Generate a standalone code or document file on demand | `/file generate filename:app.py prompt:Build a FastAPI CRUD app` |
-| `/create_file` | Quick shortcut to generate a downloadable code or document file | `/create_file filename:schema.sql prompt:Create a PostgreSQL user table` |
-
-**`/file generate` & `/create_file`** — Generates complete, un-truncated code or documentation files. Outputs an interactive syntax-highlighted code block in the Discord chat and attaches the standalone file (`discord.File`) directly below for instant download.
-
----
-
-### 🔄 Admin Command Synchronization
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `!sync` | Force instant slash command sync to your Discord server | `!sync` |
-
-**`!sync`** — Instantly syncs all 24 slash commands directly to the current Discord server with zero caching or propagation delay.
 
 ---
 
@@ -188,12 +159,15 @@ Zauq maintains context across 3 distinct memory layers:
 
 | Command | Description | Usage Example |
 |---|---|---|
-| `/model status` | View current model tier, provider, and model name | `/model status` |
-| `/model set` | Set channel model tier, provider, and model name | `/model set tier:1 provider:gemini model:gemini-2.5-pro` |
+| `/model status` | View active model tier, provider, model name, and inheritance scope | `/model status` |
+| `/model set` | Set model tier/provider (channel-specific or permanent community default) | `/model set tier:1 provider:gemini scope:Server model:gemini-2.5-pro` |
+| `/model reset` | Clear channel model override and revert to community server default | `/model reset` |
 
-**`/model status`** — Displays the currently active model for this channel, including the tier number, provider name, and specific model. Shows who last changed the model and when.
+**`/model status`** — Displays the currently active model for this channel, including tier number, provider name, specific model, and whether the setting is a **Channel-Specific Override**, **Community Server Default**, or **System Fallback**.
 
-**`/model set`** — Locks the channel to a specific model tier and provider. Supports autocomplete for model names. Changes take effect immediately for all subsequent messages in the channel.
+**`/model set`** — Locks the channel or entire server to a specific model tier and provider. Supports `scope: Channel` vs `scope: Server`. Requires administrator or authorized role.
+
+**`/model reset`** — Clears a channel's model override so it inherits the community server default model.
 
 ---
 
@@ -256,21 +230,30 @@ Zauq maintains context across 3 distinct memory layers:
 | `/voice join` | Connect Zauq to your current voice channel | `/voice join` |
 | `/voice leave` | Disconnect Zauq from the voice channel | `/voice leave` |
 
-**`/tts`** — Converts text into high-quality neural speech using Microsoft Edge Neural TTS (zero API cost). Outputs an `.mp3` file uploaded as a Discord attachment. Supports **9 voices across 7 languages**:
+**`/tts`** — Converts text into high-quality neural speech using Microsoft Edge Neural TTS (zero API cost). Outputs an `.mp3` file uploaded as a Discord attachment. Supports **19 voices across 9 languages**:
 
 | Voice | Language | Gender |
 |---|---|---|
 | `Christopher` | English (US) | Male |
 | `Ava` | English (US) | Female |
+| `Guy` | English (US) | Male |
+| `Sonia` | English (UK) | Female |
+| `Brian` | English (UK) | Male |
 | `Asad` | Urdu (PK) | Male |
 | `Uzma` | Urdu (PK) | Female |
 | `Madhur` | Hindi (IN) | Male |
+| `Swara` | Hindi (IN) | Female |
 | `Hamed` | Arabic (SA) | Male |
+| `Zariyah` | Arabic (SA) | Female |
 | `Alvaro` | Spanish (ES) | Male |
+| `Elvira` | Spanish (ES) | Female |
 | `Henri` | French (FR) | Male |
+| `Denise` | French (FR) | Female |
+| `Conrad` | German (DE) | Male |
+| `Katja` | German (DE) | Female |
 | `Keita` | Japanese (JP) | Male |
+| `Nanami` | Japanese (JP) | Female |
 
-Additional backend voices available (not in slash choice menu): `guy` (US Male), `sonia` (UK Female), `brian` (UK Male), `swara` (Hindi Female), `zariyah` (Arabic Female), `elvira` (Spanish Female), `denise` (French Female), `conrad` (German Male), `katja` (German Female), `nanami` (Japanese Female).
 
 **`/voice join`** — Connects Zauq to the voice channel you're currently in.
 
@@ -361,9 +344,12 @@ The default model is **Gemini Flash Image** which uses Google's `gemini-3.1-flas
 
 | Command | Description | Usage Example |
 |---|---|---|
+| `/admin set_role` | Designate an upper role with management permissions for Zauq | `/admin set_role role:@AI-Admin` |
 | `/admin memory` | View server memory and lore vector stats | `/admin memory` |
 | `/admin channels` | View channels with configured AI profiles | `/admin channels` |
 | `/stats` | View server request volume, latency, and provider metrics | `/stats` |
+
+**`/admin set_role`** — Designates an upper Discord role (e.g. `@AI-Admin` or `@Moderator`) allowing members with this role to configure Zauq's model tiers, operating modes, and server settings without needing full Discord Administrator permissions. Leave `role` blank to clear. Requires **Administrator** permission.
 
 **`/admin memory`** — Shows detailed memory statistics including: total user memories stored, total server lore entries, total API requests processed, and average response latency. Data sourced from Supabase. Requires **Administrator** permission.
 
@@ -373,7 +359,7 @@ The default model is **Gemini Flash Image** which uses Google's `gemini-3.1-flas
 
 ---
 
-## 🏆 7. XP & Reputation System
+## 🏆 9. XP & Reputation System
 
 Zauq tracks user engagement through an XP and leveling system:
 
@@ -403,7 +389,7 @@ Zauq tracks user engagement through an XP and leveling system:
 
 ---
 
-## 🛡️ 8. AI Content Moderation
+## 🛡️ 10. AI Content Moderation
 
 When enabled, Zauq uses AI to automatically moderate incoming messages:
 
@@ -427,7 +413,7 @@ All moderation actions are logged to the `moderation_log` Supabase table with: g
 
 ---
 
-## 🔌 9. Plugin System
+## 🔌 11. Plugin System
 
 Zauq supports community-made extensions through the plugin system:
 
@@ -461,7 +447,7 @@ async def setup(bot: commands.Bot):
 
 ---
 
-## 🔒 10. Security, Rate Limits & Privacy
+## 🔒 12. Security, Rate Limits & Privacy
 
 ### Rate Limiting Middleware
 - Per-Guild Limit: Max **30 requests / minute**
@@ -488,7 +474,7 @@ async def setup(bot: commands.Bot):
 
 ---
 
-## 🔧 11. Process Management (PM2 Commands)
+## 🔧 13. Process Management (PM2 Commands)
 
 To manage Zauq on your VPS:
 
@@ -521,7 +507,7 @@ All Zauq components use Python's `logging` module with a centralized configurati
 
 ---
 
-## 🗄️ 12. Database Tables
+## 🗄️ 14. Database Tables
 
 Zauq uses the following Supabase tables:
 

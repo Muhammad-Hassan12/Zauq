@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Dict, Any
 from backend.memory.db import db_helper
@@ -16,7 +17,7 @@ async def add_server_lore(guild_id: str, source_type: str, content: str) -> Dict
         "content": content,
         "embedding": embedding
     }
-    res = db_helper.supabase.table("server_lore").insert(payload).execute()
+    res = await asyncio.to_thread(lambda: db_helper.supabase.table("server_lore").insert(payload).execute())
     return res.data[0] if res.data else payload
 
 async def search_server_lore(guild_id: str, query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:

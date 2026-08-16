@@ -3,8 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class ModerationSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -26,7 +25,7 @@ class ModerationSlash(commands.Cog):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/moderation/settings", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Error updating moderation: {res.text}", ephemeral=True)
@@ -64,7 +63,7 @@ class ModerationSlash(commands.Cog):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/moderation/settings", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Error updating sensitivity: {res.text}", ephemeral=True)
@@ -87,7 +86,7 @@ class ModerationSlash(commands.Cog):
         guild_id = str(interaction.guild_id) if interaction.guild_id else "global"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/moderation/log?guild_id={guild_id}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Error fetching moderation logs: {res.text}", ephemeral=True)

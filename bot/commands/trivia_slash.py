@@ -3,8 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class TriviaView(discord.ui.View):
     def __init__(self, correct_index: int, explanation: str, author_id: int, guild_id: str):
@@ -24,7 +23,7 @@ class TriviaView(discord.ui.View):
         if chosen_index == self.correct_index:
             # Award +5 XP for correct answer
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+                async with api_client(timeout=5.0) as client:
                     await client.post(
                         f"{BACKEND_URL}/api/xp/award?user_id={user_id}&guild_id={self.guild_id}&display_name={interaction.user.display_name}&xp=5&stat_type=trivia_correct"
                     )
@@ -39,7 +38,7 @@ class TriviaView(discord.ui.View):
         else:
             # Award +1 XP for participation
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+                async with api_client(timeout=5.0) as client:
                     await client.post(
                         f"{BACKEND_URL}/api/xp/award?user_id={user_id}&guild_id={self.guild_id}&display_name={interaction.user.display_name}&xp=1&stat_type=trivia_played"
                     )
@@ -91,7 +90,7 @@ class TriviaSlash(commands.Cog):
         diff_val = difficulty.value if difficulty else "medium"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/games/trivia?guild_id={guild_id}&difficulty={diff_val}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Trivia Error: {res.text}")

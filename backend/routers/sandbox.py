@@ -1,11 +1,13 @@
+import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from backend.sandbox.code_runner import execute_code
+from backend.memory.db import db_helper
+
+logger = logging.getLogger("zauq.sandbox")
 
 router = APIRouter(prefix="/api/sandbox", tags=["Code Sandbox"])
-
-from backend.memory.db import db_helper
 
 class CodeExecRequest(BaseModel):
     code: str
@@ -34,5 +36,6 @@ async def run_code(req: CodeExecRequest):
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Sandbox execution error: {e}")
+        raise HTTPException(status_code=500, detail="Code execution sandbox error.")
 

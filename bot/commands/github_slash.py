@@ -1,12 +1,10 @@
 
-
 import httpx
 import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class GitHubSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -25,7 +23,7 @@ class GitHubSlash(commands.Cog):
                 return
             owner, repo_name = parts[0], parts[1]
 
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with api_client(timeout=15.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/github/pr?owner={owner}&repo={repo_name}&pr_number={pr_number}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Failed to fetch PR #{pr_number}: {res.text}")
@@ -60,7 +58,7 @@ class GitHubSlash(commands.Cog):
                 return
             owner, repo_name = parts[0], parts[1]
 
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with api_client(timeout=15.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/github/issue?owner={owner}&repo={repo_name}&issue_number={issue_number}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Failed to fetch Issue #{issue_number}: {res.text}")
@@ -102,7 +100,7 @@ class GitHubSlash(commands.Cog):
                 "repo": repo_name
             }
 
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with api_client(timeout=20.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/github/ingest", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Ingestion failed: {res.text}")

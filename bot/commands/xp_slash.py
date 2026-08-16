@@ -3,8 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
-
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
+from bot.api import BACKEND_URL, api_client
 
 class XPSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -19,7 +18,7 @@ class XPSlash(commands.Cog):
         guild_id = str(interaction.guild_id) if interaction.guild_id else "global"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/xp/rank?user_id={target_id}&guild_id={guild_id}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Error fetching rank: {res.text}")
@@ -62,7 +61,7 @@ class XPSlash(commands.Cog):
         guild_id = str(interaction.guild_id) if interaction.guild_id else "global"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with api_client(timeout=10.0) as client:
                 res = await client.get(f"{BACKEND_URL}/api/xp/leaderboard?guild_id={guild_id}")
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Error fetching leaderboard: {res.text}")

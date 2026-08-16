@@ -1,13 +1,12 @@
 
-
 import os
 import httpx
 import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
+from bot.api import BACKEND_URL, api_client
 
-BACKEND_URL = f"http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}"
 
 class VoiceSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -72,7 +71,7 @@ class VoiceSlash(commands.Cog):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with api_client(timeout=15.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/media/tts", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ TTS synthesis error: {res.text}")

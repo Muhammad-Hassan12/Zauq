@@ -1,8 +1,11 @@
+import logging
 import math
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from backend.memory.embeddings import embedding_client
+
+logger = logging.getLogger("zauq.context")
 
 router = APIRouter(prefix="/api/context", tags=["Context Optimization"])
 
@@ -47,4 +50,5 @@ async def rank_context(req: ContextRankRequest):
         ranked = [item[2] for item in top_candidates]
         return {"ranked_messages": ranked}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Context Ranking Error: {str(e)}")
+        logger.error(f"Context ranking error: {e}")
+        raise HTTPException(status_code=500, detail="Context ranking computation failed.")

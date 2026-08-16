@@ -8,6 +8,10 @@ CREATE TABLE IF NOT EXISTS guild_configs (
     guild_id TEXT PRIMARY KEY,
     guild_name TEXT NOT NULL,
     default_mode TEXT NOT NULL DEFAULT 'hangout' CHECK (default_mode IN ('dev', 'hangout')),
+    default_tier INT NOT NULL DEFAULT 1,
+    default_provider TEXT NOT NULL DEFAULT 'gemini',
+    default_model_name TEXT NOT NULL DEFAULT 'gemini-2.5-flash',
+    admin_role_id TEXT,
     moderation_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     moderation_sensitivity TEXT NOT NULL DEFAULT 'medium' CHECK (moderation_sensitivity IN ('low', 'medium', 'high')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -75,9 +79,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
 
 CREATE INDEX IF NOT EXISTS idx_request_logs_guild ON request_logs(guild_id);
 
--- 7. User Stats & XP Reputation System
+-- 7. User Stats & XP Reputation System (Composite PK: user_id + guild_id)
 CREATE TABLE IF NOT EXISTS user_stats (
-    user_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
     guild_id TEXT NOT NULL,
     display_name TEXT,
     xp INT NOT NULL DEFAULT 0,
@@ -87,8 +91,10 @@ CREATE TABLE IF NOT EXISTS user_stats (
     trivia_correct INT NOT NULL DEFAULT 0,
     trivia_played INT NOT NULL DEFAULT 0,
     streak_days INT NOT NULL DEFAULT 0,
+    last_active_date DATE,
     last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, guild_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_stats_guild ON user_stats(guild_id);
@@ -136,16 +142,27 @@ ALTER TABLE user_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scheduled_reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE moderation_log ENABLE ROW LEVEL SECURITY;
 
--- Allow full access for backend service role
-CREATE POLICY "Allow service role full access on guild_configs" ON guild_configs FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on channel_profiles" ON channel_profiles FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on model_selection" ON model_selection FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on user_memories" ON user_memories FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on server_lore" ON server_lore FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on request_logs" ON request_logs FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on user_stats" ON user_stats FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on scheduled_reminders" ON scheduled_reminders FOR ALL USING (true);
-CREATE POLICY "Allow service role full access on moderation_log" ON moderation_log FOR ALL USING (true);
+-- Restrictive policies: authenticated/anon roles blocked from direct client access
+-- Backend service_role key bypasses RLS and maintains full programmatic access
+CREATE POLICY "Service role only on guild_configs" ON guild_configs FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on channel_profiles" ON channel_profiles FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on model_selection" ON model_selection FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on user_memories" ON user_memories FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on server_lore" ON server_lore FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on request_logs" ON request_logs FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on user_stats" ON user_stats FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on scheduled_reminders" ON scheduled_reminders FOR ALL TO authenticated USING (false);
+CREATE POLICY "Service role only on moderation_log" ON moderation_log FOR ALL TO authenticated USING (false);
+
+CREATE POLICY "Block anon on guild_configs" ON guild_configs FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on channel_profiles" ON channel_profiles FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on model_selection" ON model_selection FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on user_memories" ON user_memories FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on server_lore" ON server_lore FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on request_logs" ON request_logs FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on user_stats" ON user_stats FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on scheduled_reminders" ON scheduled_reminders FOR ALL TO anon USING (false);
+CREATE POLICY "Block anon on moderation_log" ON moderation_log FOR ALL TO anon USING (false);
 
 -- Vector similarity search RPC function for server_lore
 CREATE OR REPLACE FUNCTION match_server_lore(
