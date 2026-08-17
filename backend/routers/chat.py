@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from typing import List, Dict, Optional, Any, Literal
 
+from backend.config import settings
 from backend.memory.db import db_helper
 from backend.models.router import model_router
 from backend.memory.episodic import extract_and_store_user_memories
