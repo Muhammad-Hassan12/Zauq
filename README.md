@@ -21,7 +21,7 @@
 
 It connects a lightweight `discord.py` gateway thin client to an ultra-fast **FastAPI backend engine** running locally under PM2 on Port **8002**.
 
-Zauq supports multi-turn conversational memory, automatic document text parsing (`.pdf`, `.docx`, `.xlsx`, `.txt`, `.py`, `.png`), sandboxed code execution inside isolated Docker containers, free neural text-to-speech in 10+ languages, free AI image generation via Gemini, an XP/reputation leaderboard system, AI-powered content moderation, scheduled reminders, conversation export, and server lore RAG vector search.
+Zauq supports multi-turn conversational memory, automatic document text parsing (`.pdf`, `.docx`, `.xlsx`, `.txt`, `.py`, `.png`), sandboxed code execution inside isolated Docker containers, free neural text-to-speech with 19 voices across 8 languages, free AI image generation via Gemini, an XP/reputation leaderboard system, AI-powered content moderation, scheduled reminders, conversation export, and server lore RAG vector search.
 
 ---
 
@@ -108,23 +108,26 @@ Zauq rejects unreliable cascade fallbacks in favor of **explicit locking**. Chan
 * **Tier 2 (Local VPS)**: Local Ollama server (`ollama`: `qwen3.5:4b` - zero API cost).
 * **Tier 3 (Batch GPU)**: Cloudflared tunneled Kaggle T4 worker (`kaggle`: `qwen3.5-t4` - pings `/health` before locking).
 
-### 📄 5. Universal Document, Vision & Voice Note Ingestion
-Upload any document, code file, image, or voice note directly to Discord! Zauq automatically parses:
+### 📄 5. Universal Document, Vision & Voice Note Ingestion (30,000 Token Capacity)
+Upload any document, code file, image, or voice note directly to Discord! Zauq's parsing engine supports up to **120,000 characters (~30,000 tokens / ~3,000+ lines of text)** per document:
 * **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Native Gemini 2.5 Flash audio waveform ingestion for **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automated fallback transcriber for open models)
-* **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh`
-* **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf`)
+* **Code & Text Files**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh` (Parsed in full up to 30,000 tokens)
+* **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf` with 120k char limits)
 * **Word Documents**: `.docx` (text and tables extracted via `python-docx`)
 * **Spreadsheets & Data**: `.csv`, `.xlsx` (parsed via `openpyxl` into structured Markdown tables)
 * **Multimodal Vision & OCR Fallback**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Vision or transcribed for text models)
 
 ### 📁 6. On-Demand Dynamic File Generation & Project ZIP Bundles (`/file generate`, `/create_file`)
-* **On-Demand File Delivery**: Generates complete, un-truncated `.py`, `.html`, `.json`, `.sql`, `.md`, `.sh`, `.css` files on user demand.
+* **On-Demand File Delivery**: Generates complete, un-truncated `.py`, `.html`, `.json`, `.sql`, `.md`, `.sh`, `.css` files on user demand (up to **8,192 output tokens**).
 * **Dual Output Architecture**: Displays an interactive syntax-highlighted code preview directly in chat **and attaches the standalone file as a native Discord attachment (`discord.File`)**.
 * **Automatic Project ZIP Bundling**: When 2 or more files are created simultaneously (e.g. full frontend + backend), Zauq automatically packages them into a `project_files.zip` downloadable archive.
 
-### 🌐 7. Live Internet Access, Web Roaming & URL Scraper (`/search`)
-* **Google Search Grounding**: Gemini models dynamically roam Google Search in real-time, retrieving live facts, sports scores, documentation updates, and formatting clickable markdown citation links.
-* **Universal DuckDuckGo Search**: Open model tiers (DigitalOcean DeepSeek / Ollama) receive live web search context snippets.
+### 🌐 7. Deep Web Roaming, Autonomous Search & URL Scraper (`/search`)
+* **Autonomous Deep Web Roaming**: Concurrently visits and scrapes the **full readable content of the top 2–3 search result pages** in parallel via `asyncio.gather()` and Jina Reader / SSRF-safe parsers, injecting authoritative multi-source context rather than brief 20-word snippets.
+* **Smart Multi-Query Expansion**: NLP optimizer strips conversational filler and decomposes complex queries into 2–3 targeted search queries to maximize factual accuracy.
+* **Domain & Category Filters**: Target searches directly to **💻 GitHub Repos (`github`)**, **📑 ArXiv Papers (`arxiv`)**, **📚 Developer Docs (`docs`)**, **📖 Wikipedia (`wikipedia`)**, or **📰 News (`news`)**.
+* **Automatic Chat Intent Triggering**: Live search activates **automatically during normal chat** whenever the user asks for research, real-time events, news, or factual lookups without requiring a slash command.
+* **Google Search Grounding**: Gemini models dynamically roam Google Search in real-time and format clickable markdown citation links.
 * **Live URL Content Reader**: Drop any HTTP/HTTPS link in chat (e.g. documentation, arXiv papers, news articles) and Zauq will automatically fetch and read the webpage content.
 
 ### 🧠 8. 3-Layer Vector Memory Architecture
@@ -139,7 +142,7 @@ Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 
 ### 🔊 10. Free Multi-Language Neural TTS & Voice Companion (`/tts`, `/voice`)
 * **Engine**: Microsoft Edge Neural TTS (`edge-tts`). Zero API cost.
-* **19 Voices** across **7 Languages**: English (US/UK), Urdu, Hindi, Arabic, Spanish, French, German, Japanese.
+* **19 Voices** across **8 Languages**: English (US/UK), Urdu, Hindi, Arabic, Spanish, French, German, Japanese.
 * **Voice Channel Support**: `/voice join` connects Zauq to voice channels for audio playback.
 * **Voice-to-Voice Companion**: Automatically generates voice note audio responses when voice notes are sent in Hangout mode.
 
@@ -167,14 +170,14 @@ Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 
 ---
 
-## 📜 Complete Slash Command Reference (25 Commands)
+## 📜 Complete Slash Command Reference (25 Command Groups · 33 Actions)
 
 | Command | Category | Description |
 |---|---|---|
 | `/mode` | Core | Switch channel or server operating mode (`dev` or `hangout`). |
 | `/mode_reset` | Core | Clear channel mode override and revert to community default. |
 | `/summarize` | Core | Summarize thread or channel discussion into bullet points. |
-| `/search` | Search | Search the live internet and get an AI summary with citations. |
+| `/search` | Search | Deep web roaming search with full-page reading, deep toggle & category filters. |
 | `/file generate` | File | Generate a complete code or document file on demand. |
 | `/create_file` | File | Quick shortcut to generate a downloadable code or document file. |
 | `/model status` | Models | View active model tier, provider, model name, and inheritance scope. |

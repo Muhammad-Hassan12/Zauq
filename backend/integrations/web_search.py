@@ -182,6 +182,129 @@ class WebSearchEngine:
 
         return "[Unable to retrieve content from URL]"
 
+    def apply_category_filter(self, query: str, category: str = "all") -> str:
+        """Appends domain-specific filters to search query based on category."""
+        category = (category or "all").lower().strip()
+        cleaned_q = query.strip()
+
+        if category == "github":
+            return f"site:github.com {cleaned_q}"
+        elif category == "arxiv":
+            return f"site:arxiv.org {cleaned_q}"
+        elif category == "docs":
+            return f"(site:docs.python.org OR site:developer.mozilla.org OR site:fastapi.tiangolo.com OR site:devdocs.io) {cleaned_q}"
+        elif category == "wikipedia":
+            return f"site:wikipedia.org {cleaned_q}"
+        elif category == "news":
+            return f"(site:news.ycombinator.com OR site:reuters.com OR site:techcrunch.com) {cleaned_q}"
+        return cleaned_q
+
+    def optimize_search_queries(self, raw_query: str, max_queries: int = 3) -> List[str]:
+        """
+        Cleans conversational filler and decomposes complex queries into 1-3 targeted search queries.
+        """
+        if not raw_query:
+            return []
+
+        # Remove conversational filler
+        filler_patterns = [
+            r'^(?:please\s+)?(?:can\s+you\s+)?(?:search\s+(?:for|about|the\s+web\s+for)?|research\s+about|look\s+up|find\s+information\s+on|tell\s+me\s+about|what\s+do\s+you\s+know\s+about)\s+',
+            r'(?:,\s*)?(?:research\s+about\s+it\s+and\s+tell\s+me|tell\s+me\s+more|give\s+me\s+details|explain\s+in\s+detail|and\s+give\s+citations)[\.\!\?]*$'
+        ]
+        cleaned = raw_query.strip()
+        for p in filler_patterns:
+            cleaned = re.sub(p, "", cleaned, flags=re.IGNORECASE).strip()
+
+        queries = [cleaned] if cleaned else [raw_query.strip()]
+
+        # Generate a concise keyword variant for search engines if the query is long
+        words = cleaned.split()
+        if len(words) > 6:
+            stop_words = {"a", "an", "the", "in", "on", "at", "of", "for", "to", "and", "or", "is", "are", "where", "it", "strictly", "not", "allowed"}
+            keywords = [w for w in words if w.lower() not in stop_words and len(w) > 2]
+            if keywords and len(keywords) >= 3:
+                keyword_query = " ".join(keywords[:7])
+                if keyword_query not in queries:
+                    queries.append(keyword_query)
+
+        return queries[:max_queries]
+
+    async def deep_search_and_roam(
+        self,
+        query: str,
+        max_results: int = 5,
+        roam_top_n: int = 2,
+        category: str = "all"
+    ) -> Dict[str, Any]:
+        """
+        Autonomous Deep Web Roaming Engine:
+        1. Formulates category-filtered search queries.
+        2. Retrieves top search results from DuckDuckGo.
+        3. Concurrently visits & reads the top N result webpages in parallel using Jina / SSRF-safe scraper.
+        4. Synthesizes rich distilled page context with clickable markdown citations.
+        """
+        import asyncio
+
+        optimized_queries = self.optimize_search_queries(query)
+        primary_query = optimized_queries[0] if optimized_queries else query
+        filtered_query = self.apply_category_filter(primary_query, category)
+
+        search_results = await self.search_duckduckgo(filtered_query, max_results=max_results)
+        
+        # If filtered query returned no results and category wasn't 'all', fallback to unfiltered query
+        if not search_results and category != "all":
+            search_results = await self.search_duckduckgo(primary_query, max_results=max_results)
+
+        roamed_pages = []
+        citations = []
+
+        if search_results:
+            # Build citations list
+            for idx, r in enumerate(search_results[:5]):
+                title = r.get("title", f"Source {idx+1}")
+                url = r.get("url", "")
+                if url:
+                    clean_title = (title[:60] + "...") if len(title) > 60 else title
+                    citations.append(f"• [{clean_title}]({url})")
+
+            # Deep Roaming: Fetch full content of top N URLs in parallel
+            if roam_top_n > 0:
+                target_urls = [r["url"] for r in search_results[:roam_top_n] if r.get("url") and is_safe_public_url(r.get("url"))]
+                if target_urls:
+                    fetch_tasks = [self.fetch_url_content(u, max_chars=3500) for u in target_urls]
+                    page_contents = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+                    for idx, content in enumerate(page_contents):
+                        if isinstance(content, str) and len(content.strip()) > 100 and not content.startswith("[Failed") and not content.startswith("[Access"):
+                            roamed_pages.append({
+                                "title": search_results[idx].get("title", f"Source {idx+1}"),
+                                "url": target_urls[idx],
+                                "content": content.strip()
+                            })
+
+        # Assemble rich context text block for LLM prompt
+        context_blocks = []
+        if roamed_pages:
+            context_blocks.append("### 📑 Full-Page Web Research Context:")
+            for p in roamed_pages:
+                context_blocks.append(f"--- Source: {p['title']} ({p['url']}) ---\n{p['content']}\n")
+        elif search_results:
+            context_blocks.append("### 🌐 Live Web Search Snippets:")
+            for r in search_results[:4]:
+                context_blocks.append(f"• **{r['title']}** ({r['url']}):\n  {r['snippet']}")
+
+        context_text = "\n".join(context_blocks)
+
+        return {
+            "query": query,
+            "optimized_query": primary_query,
+            "category": category,
+            "results": search_results,
+            "roamed_pages": roamed_pages,
+            "context_text": context_text,
+            "citations": citations
+        }
+
     def extract_urls(self, text: str) -> List[str]:
         """Extracts all http/https URLs from a text string."""
         if not text:
@@ -190,13 +313,47 @@ class WebSearchEngine:
         return re.findall(pattern, text)
 
     def should_search_web(self, query: str) -> bool:
-        """Heuristic check if a user query likely requires live search."""
-        keywords = [
-            "latest", "news", "today", "yesterday", "current", "release", "version",
-            "price", "weather", "score", "match", "stock", "update", "released",
-            "who is the current", "what happened", "recent", "search for", "google", "browse"
-        ]
+        """
+        Intelligent heuristic check if a user query requires live web search.
+        Matches explicit search requests ('search for', 'look up', 'find out', 'browse')
+        as well as real-time, factual, or research intents.
+        """
+        if not query or len(query.strip()) < 3:
+            return False
+
         q_lower = query.lower()
-        return any(kw in q_lower for kw in keywords)
+
+        # 1. Explicit search commands in chat prompt
+        explicit_search_triggers = [
+            "search", "look up", "find info", "find information", "find out",
+            "browse the web", "check online", "google it", "google for",
+            "search the web", "search online", "search for", "look on the web",
+            "look online", "search up", "research about", "research on"
+        ]
+        if any(trigger in q_lower for trigger in explicit_search_triggers):
+            return True
+
+        # 2. Real-time & temporal news/events keywords
+        temporal_keywords = [
+            "latest", "news", "today", "yesterday", "tonight", "this week",
+            "this month", "current", "release", "version", "price", "weather",
+            "score", "match", "stock", "update", "released", "what happened",
+            "recent", "who won", "upcoming", "schedule", "newest", "changelog"
+        ]
+        if any(kw in q_lower for kw in temporal_keywords):
+            return True
+
+        # 3. Deep Research & Factual Inquiry Triggers
+        research_keywords = [
+            "research", "investigate", "compare", "benchmark", "analysis",
+            "sources", "facts", "forbidden", "places on earth", "who created",
+            "when did", "documentation", "github repo", "arxiv paper",
+            "is it true that", "who is the current", "what is the current",
+            "who is the new", "status of"
+        ]
+        if any(kw in q_lower for kw in research_keywords):
+            return True
+
+        return False
 
 web_search_engine = WebSearchEngine()

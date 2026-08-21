@@ -37,6 +37,8 @@ class ChatRequest(BaseModel):
     mode_override: Optional[str] = None
     attachments: Optional[List[AttachmentItem]] = None
     enable_web_search: Optional[bool] = None
+    deep_search: Optional[bool] = False
+    search_category: Optional[str] = "all"
 
     @field_validator('messages')
     @classmethod
@@ -236,6 +238,23 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
                     target_user_msg["content"] += f"\n\n[Attached Live Webpage Content for {u}]:\n{page_text}"
             except Exception as url_err:
                 logger.info(f"URL scrape failed for {u}: {url_err}")
+
+    # If deep search is explicitly requested or domain category is specified, enrich context with Deep Web Roaming
+    if req.messages and (req.deep_search or (req.search_category and req.search_category != "all")):
+        target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
+        user_text = target_user_msg.get("content", "")
+        search_data = await web_search_engine.deep_search_and_roam(
+            query=user_text,
+            max_results=5,
+            roam_top_n=3 if req.deep_search else 2,
+            category=req.search_category or "all"
+        )
+        if search_data.get("context_text"):
+            target_user_msg["content"] += (
+                f"\n\n[Autonomous Deep Web Research Context]:\n"
+                f"{search_data['context_text']}\n\n"
+                "Synthesize a well-structured, authoritative, and detailed research answer with citations based on the sources above."
+            )
 
     try:
         try:

@@ -80,8 +80,8 @@ class ModelRouter:
                 except Exception as e:
                     logger.warning(f"Vision fallback failed for {fname}: {e}")
 
-    async def _handle_search_context(self, messages: List[Dict[str, Any]], enable_search: bool = False):
-        """Fetches live DuckDuckGo web search results and injects them into text-only prompts."""
+    async def _handle_search_context(self, messages: List[Dict[str, Any]], enable_search: bool = False, category: str = "all"):
+        """Fetches live search and deep roamed page contents and injects them into text-only prompts."""
         if not enable_search or not messages:
             return
 
@@ -89,16 +89,19 @@ class ModelRouter:
         if not last_query or len(last_query.strip()) < 3:
             return
 
-        search_results = await web_search_engine.search_duckduckgo(last_query, max_results=4)
-        if search_results:
-            formatted_snippets = []
-            for r in search_results:
-                formatted_snippets.append(f"• **{r['title']}** ({r['url']}):\n  {r['snippet']}")
-            
+        search_data = await web_search_engine.deep_search_and_roam(
+            query=last_query,
+            max_results=5,
+            roam_top_n=2,
+            category=category
+        )
+
+        if search_data.get("context_text"):
             search_block = (
-                f"\n\n[Live Web Search Context for '{last_query[:60]}']:\n" +
-                "\n".join(formatted_snippets) +
-                "\n\nUse the above live search information to provide an up-to-date and accurate answer."
+                f"\n\n[Live Deep Web Research Context for '{last_query[:60]}']:\n"
+                f"{search_data['context_text']}\n\n"
+                "Use the authoritative research information above to provide a comprehensive, accurate, and up-to-date answer. "
+                "Include relevant source references if appropriate."
             )
             messages[-1]["content"] += search_block
 

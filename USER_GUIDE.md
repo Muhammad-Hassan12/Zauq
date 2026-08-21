@@ -1,6 +1,6 @@
-# 🤖 Zauq — Complete Master Guide & Documentation (v3.0)
+# 🤖 Zauq — Complete Master Guide & Documentation (v3.1 — Deep Web Intelligence & Hardened)
 
-**Zauq (ذوق)** is an AgenticEra Hybrid AI Discord Bot built on a high-performance **FastAPI backend engine** and a **`discord.py` thin-client frontend**. It features an explicit 3-Tier model selection router, a 3-Layer vector memory architecture (pgvector), isolated Docker code execution, free neural TTS voice synthesis, AI image generation, AI content moderation, an XP/reputation system, and interactive mini-games.
+**Zauq (ذوق)** is an AgenticEra Hybrid AI Discord Bot built on a high-performance **FastAPI backend engine** and a **`discord.py` thin-client frontend**. It features an explicit 3-Tier model selection router, Deep Web Roaming intelligence, a 3-Layer vector memory architecture (pgvector), isolated Docker code execution, free neural TTS voice synthesis, AI image generation, AI content moderation, an XP/reputation system, and interactive mini-games.
 
 ---
 
@@ -82,23 +82,23 @@ Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit l
 
 ---
 
-## 📄 4. Universal Document, Vision & Voice Note Ingestion
+## 📄 4. Universal Document, Vision & Voice Note Ingestion (30,000 Token Capacity)
 
-Zauq automatically reads attached files in Discord without needing separate commands:
+Zauq automatically parses attached files in Discord with an expanded ingestion capacity of up to **120,000 characters (~30,000 tokens / ~3,000+ lines of text)** per document:
 - **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Native Gemini audio waveform ingestion for **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automatic fallback transcriber for open models)
-- **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh`
-- **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf`)
+- **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh` (Parsed completely up to 30,000 tokens)
+- **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf` with 120k char safety bounds)
 - **Word Documents**: `.docx` (paragraphs and tables extracted via `python-docx`)
 - **Spreadsheets**: `.csv`, `.xlsx` (converted into Markdown tables via `openpyxl`)
 - **Images & Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Multimodal Vision, or automatically transcribed via Gemini Flash OCR fallback for text-only models like GLM/DeepSeek)
 
-**Usage**: Simply attach a file or voice note to your message when mentioning @Zauq. The file is automatically parsed and included in the AI context.
+**Usage**: Simply attach a file or voice note to your message when mentioning @Zauq. The file is automatically parsed in full and included in the AI context.
 
 ---
 
-## 📁 5. On-Demand Dynamic File Generation & ZIP Packaging
+## 📁 5. On-Demand Dynamic File Generation & ZIP Packaging (8,192 Token Output)
 
-Zauq features an enterprise file generation engine:
+Zauq features an enterprise file generation engine capable of outputting up to **8,192 tokens (~32,000 characters)** per generation:
 - **On-Demand Standalone Files**: Ask Zauq to generate any full code or document file (e.g. *"create a landing page in index.html"*, *"generate a FastAPI auth script in auth.py"*, *"make a database schema in schema.sql"*).
 - **Dual Presentation**: Displays an interactive syntax-highlighted code block directly in chat **and uploads the complete, standalone file as a native Discord attachment (`discord.File`)** for 1-click download.
 - **Multi-File ZIP Archives**: If you request multiple files at once (e.g. HTML + CSS + JS or Backend + Dockerfile), Zauq automatically bundles all generated files into an in-memory `project_files.zip` download archive.
@@ -106,13 +106,36 @@ Zauq features an enterprise file generation engine:
 
 ---
 
-## 🌐 6. Real-Time Web Access, Search Grounding & URL Scraper
+## 🌐 6. Deep Web Roaming, Autonomous Search & URL Scraper
 
-Zauq breaks free from model training cutoffs with real-time internet intelligence:
-- **Google Search Grounding**: Tier 1 Gemini models dynamically roam Google Search in real-time to answer questions with the latest news, documentation releases, and live data, appending formatted clickable citation links.
-- **Universal DuckDuckGo Search**: Open model tiers (DigitalOcean DeepSeek / Ollama) receive live search snippets injected directly into their prompt context.
-- **Live URL Content Reader**: Drop any HTTP/HTTPS link in chat (e.g. documentation, arXiv papers, news articles) and Zauq will automatically fetch and read the webpage content using Jina Reader.
-- **Command**: `/search query:<your question>` for dedicated grounded research.
+Zauq features an autonomous deep web intelligence engine designed to provide comprehensive, factual, and real-time research without training cutoffs:
+
+### 1. Autonomous Deep Web Roaming (100% Free)
+- When a search is triggered, Zauq doesn't just look at 20-word search snippets.
+- It concurrently scrapes and reads the **full readable markdown content of the top 2–3 result webpages** in parallel via `asyncio.gather()` and Jina Reader / SSRF-safe parsers.
+- Injects authoritative, full-article research paragraphs directly into the model context.
+
+### 2. Multi-Query NLP Optimization & Decomposition
+- Conversational queries (e.g. *"research about the most isolated places on earth where it is strictly not allowed to go"*) are cleaned of filler words and decomposed into 2–3 laser-targeted keyword queries to maximize search coverage.
+
+### 3. Targeted Domain & Category Filters
+- Filter searches directly to specialized domains:
+  - **`all`**: Standard open web search
+  - **`github`**: Targets `site:github.com` for source code, repositories, and technical issues
+  - **`arxiv`**: Targets `site:arxiv.org` for scientific research papers and machine learning pre-prints
+  - **`docs`**: Targets official developer documentation (`docs.python.org`, `developer.mozilla.org`, `fastapi.tiangolo.com`, `devdocs.io`)
+  - **`wikipedia`**: Targets `site:wikipedia.org`
+  - **`news`**: Targets Reuters, Hacker News, TechCrunch
+
+### 4. Automatic Natural Language Search Intent (No Commands Needed)
+- You **do not** have to type `/search` to use web search.
+- Whenever you chat with Zauq (via `@Zauq` or in threads), Zauq automatically triggers live search whenever your message contains:
+  - **Search instructions**: *"search for...", "research about...", "look up...", "find info on...", "google it..."*
+  - **Real-time & temporal queries**: *"latest news...", "today", "yesterday", "current version...", "price of..."*
+  - **Deep research inquiries**: *"compare X and Y...", "benchmarks for...", "what are the most isolated places on earth..."*
+
+### 5. Live URL Content Reader
+- Drop any HTTP/HTTPS link directly in chat (e.g. documentation, arXiv papers, news articles) and Zauq will automatically fetch and read the webpage content using Jina Reader.
 
 ---
 
@@ -121,7 +144,7 @@ Zauq breaks free from model training cutoffs with real-time internet intelligenc
 Zauq maintains context across 3 distinct memory layers:
 
 ### L1 — Working Context Window
-- Automatically fetches the last **15 messages** in a thread or channel.
+- Automatically fetches the last **8 messages** in a thread or channel.
 - Auto-spawns a Discord Thread when a user mentions Zauq in a main channel to keep multi-turn conversations organized.
 - Intelligent message chunking: messages over 1,900 characters are split at line breaks and code block boundaries to preserve Markdown formatting.
 
@@ -137,7 +160,7 @@ Zauq maintains context across 3 distinct memory layers:
 
 ---
 
-## 📜 8. Complete Slash Command Reference (All 25 Commands)
+## 📜 8. Complete Slash Command Reference (25 Command Groups · 33 Actions)
 
 ### 🎯 Core & Mode Commands
 
@@ -152,6 +175,31 @@ Zauq maintains context across 3 distinct memory layers:
 **`/mode_reset`** — Clears a channel's mode override so it inherits the community server default mode.
 
 **`/summarize`** — Fetches the last 50 messages from the current channel or thread and sends them to the active AI model with a summarization prompt. Returns a clean bullet-point summary embed. Supports `brief` (3-5 bullet points) and `detailed` (comprehensive) modes.
+
+---
+
+### 🌐 Search & File Generation Commands
+
+| Command | Description | Usage Example |
+|---|---|---|
+| `/search` | Deep web roaming search with full-page reading, deep toggle & category filters | `/search query:Python 3.13 deep:True category:Developer Docs` |
+| `/file generate` | Generate a complete downloadable code or document file on demand | `/file generate filename:app.py prompt:FastAPI with JWT auth` |
+| `/create_file` | Shortcut to generate a complete downloadable project file | `/create_file filename:schema.sql prompt:PostgreSQL users table` |
+
+**`/search`** — Performs deep web research across the live internet:
+- `query` (Required): The question, topic, or technology to research.
+- `deep` (Optional, Default: `True`): Toggles between **Autonomous Deep Web Roaming** (visits and reads top 3 full pages in parallel) and **Quick Search**.
+- `category` (Optional): Filter searches by domain category:
+  - `🌐 All Web (General)`
+  - `💻 GitHub (Code & Repos)`
+  - `📑 ArXiv (Research Papers)`
+  - `📚 Developer Docs (APIs & Frameworks)`
+  - `📖 Wikipedia (Encyclopedia)`
+  - `📰 News & Tech (Recent Updates)`
+
+**`/file generate`** / **`/create_file`** — Generates complete, un-truncated standalone files up to 8,192 tokens. Displays an interactive code preview in Discord and attaches the standalone `.py`, `.html`, `.json`, `.sql`, `.md`, or `.css` file as a native downloadable attachment.
+
+---
 
 ---
 
@@ -230,7 +278,7 @@ Zauq maintains context across 3 distinct memory layers:
 | `/voice join` | Connect Zauq to your current voice channel | `/voice join` |
 | `/voice leave` | Disconnect Zauq from the voice channel | `/voice leave` |
 
-**`/tts`** — Converts text into high-quality neural speech using Microsoft Edge Neural TTS (zero API cost). Outputs an `.mp3` file uploaded as a Discord attachment. Supports **19 voices across 9 languages**:
+**`/tts`** — Converts text into high-quality neural speech using Microsoft Edge Neural TTS (zero API cost). Outputs an `.mp3` file uploaded as a Discord attachment. Supports **19 voices across 8 languages**:
 
 | Voice | Language | Gender |
 |---|---|---|
