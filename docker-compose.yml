@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: zauq-backend
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    volumes:
+      # Mount Docker socket so the backend can spin up sandbox containers
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - zauq_network
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: zauq-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - backend
+    networks:
+      - zauq_network
+
+networks:
+  zauq_network:
+    driver: bridge

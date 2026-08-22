@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     BACKEND_HOST: str = "127.0.0.1"
     BACKEND_PORT: int = 8002
     INTERNAL_API_KEY: str = ""
+    GITHUB_ALLOWED_REPOS: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

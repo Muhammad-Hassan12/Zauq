@@ -320,15 +320,36 @@ Zauq/
 
 ## 🔧 Installation & Deployment
 
-### Prerequisites
+### 🐳 1-Click Docker Deployment (Recommended)
+
+The easiest way to self-host Zauq is using Docker Compose. This automatically spins up the FastAPI backend, the Discord Bot, and handles all network and sandbox permissions.
+
+1. **Clone and Configure**:
+```bash
+git clone https://github.com/YOUR-USERNAME/Zauq.git
+cd Zauq
+cp .env.example .env
+nano .env # Fill in your tokens
+```
+
+2. **Run with Docker Compose**:
+```bash
+docker-compose up -d --build
+```
+
+### 💻 Manual Bare-Metal Deployment
+
+If you prefer to run Zauq directly on your host machine (e.g. Ubuntu VPS) using PM2.
+
+**Prerequisites**:
 * **Python**: 3.11 or higher
-* **Docker Engine**: Installed and running on host
+* **Docker Engine**: Installed and running on host (Required for the Code Execution Sandbox)
 * **PM2**: Node.js process manager installed globally (`npm install -g pm2`)
 * **Supabase Account**: With `pgvector` extension enabled
 
-### 1. Clone Repository & Environment Setup
+#### 1. Clone Repository & Environment Setup
 ```bash
-git clone https://github.com/Muhammad-Hassan12/Zauq.git
+git clone https://github.com/YOUR-USERNAME/Zauq.git
 cd Zauq
 
 cp .env.example .env
