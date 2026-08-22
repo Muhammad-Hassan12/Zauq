@@ -1,3 +1,4 @@
+import os
 import asyncio
 import hmac
 import pydantic
@@ -95,7 +96,9 @@ async def run_security_tests():
 
     # 6. License Verification
     print("6. Testing Apache 2.0 License File...")
-    with open("/root/Zauq/LICENSE", "r", encoding="utf-8") as f:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    license_path = os.path.join(repo_root, "LICENSE")
+    with open(license_path, "r", encoding="utf-8") as f:
         license_text = f.read()
     assert "Apache License" in license_text, "LICENSE does not contain Apache License text"
     assert "Version 2.0" in license_text, "LICENSE is not Version 2.0"
