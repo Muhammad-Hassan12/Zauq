@@ -24,6 +24,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Pre-pull Docker Sandbox Images
+      run: |
+        docker pull python:3.11-slim
+        docker pull node:18-alpine
+        docker pull alpine:latest
+
     - name: Run Security Hardening Suite
       run: python -m backend.utils.test_security_hardening
 
