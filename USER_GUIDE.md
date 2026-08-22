@@ -227,21 +227,34 @@ Zauq maintains context across 3 distinct memory layers:
 
 ---
 
-### ⚙️ Sandboxed Code Execution
+### ⚙️ Sandboxed Code Execution (`/run`, Apps ➔ Run Code)
 
 | Command | Description | Usage Example |
 |---|---|---|
-| `/run` | Execute code safely in an isolated Docker container | `/run code:print("hello") language:Python 3` |
+| `/run` | Execute code in isolated Docker sandbox (opens multiline popup modal if no code passed) | `/run language:Python 3` or `/run file:script.py` |
+| `Run Code Snippet` | Message Context Menu App: Right-click message containing code to run instantly | `Apps ➔ Run Code Snippet` |
 
-**`/run`** — Runs code snippets inside ephemeral, isolated Docker containers with the following security constraints:
-- **Languages**: Python 3 (`python:3.11-slim`), JavaScript (`node:18-alpine`), Bash (`alpine:latest`)
-- **Security**: `--network none` (no internet access), `--memory 256m`, `--cpus 0.5`, 5-second timeout
-- **Access**: Gated behind `channel_profiles.allow_code_exec` — enabled by default in Dev Mode, disabled in Hangout Mode
+**`/run`** — Runs code snippets and complete programs inside ephemeral, isolated Docker containers with 4 flexible input methods:
+1. **Interactive Multiline Modal Editor**: Run `/run` without code or file to pop up a full-screen paragraph editor with Enter-key newlines, indentation, and paste support (up to 4,000 characters).
+2. **Script File Upload (`file:`)**: Attach a `.py`, `.js`, or `.sh` script file directly to run programs up to 50KB.
+3. **Inline Fast One-Liner (`code:`)**: Fast single-line execution for quick math and one-liners.
+4. **Message Context Menu (`Run Code Snippet`)**: Right-click any Discord message containing markdown code blocks (` ```python ... ``` `) and select **Apps ➔ Run Code Snippet** to execute it in Docker with 1 click.
+
+- **Supported Languages**: Python 3 (`python:3.11-slim`), JavaScript / Node.js (`node:18-alpine`), Bash (`alpine:latest`)
+- **Security Constraints**: `--network none` (zero internet access), `--memory 256m`, `--cpus 0.5`, `--pids-limit 50`, `--read-only`, 5.0-second execution timeout
+- **Access Control**: Gated behind `channel_profiles.allow_code_exec` — enabled by default in Dev Mode, disabled in Hangout Mode
 
 ```
-/run code: print([x**2 for x in range(10)]) language: Python 3
-/run code: console.log(Array.from({length: 5}, (_, i) => i * 10)); language: JavaScript
-/run code: echo "Current Date: $(date)" language: Bash
+# Mode 1: Opens interactive multiline popup editor
+/run language:Python 3
+
+# Mode 2: Upload script file directly
+/run file:solution.py
+
+# Mode 3: Quick inline one-liner
+/run code:print([x**2 for x in range(10)]) language:Python 3
+
+# Mode 4: Right-click message -> Apps -> Run Code Snippet
 ```
 
 ---

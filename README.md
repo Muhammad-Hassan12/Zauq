@@ -135,10 +135,13 @@ Upload any document, code file, image, or voice note directly to Discord! Zauq's
 * **L2 User Episodic Memory (`user_memories`)**: Background worker extracts user facts after every message, storing 768-dim embeddings via `gemini-embedding-001`.
 * **L3 Server Lore RAG (`server_lore`)**: Supabase `match_server_lore` pgvector similarity search grounds answers in server rules, inside jokes, and ingested GitHub READMEs.
 
-### ⚙️ 9. Sandboxed Code Execution (`/run`)
-Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
-* **Security Constraints**: `--network none` (no internet access), `--memory 256m`, `--cpus 0.5`, 5.0 second execution timeout.
-* **Gated Access**: Restricted to `dev` mode or channels with `allow_code_exec = true`.
+### ⚙️ 9. Unified Multi-Input Sandboxed Code Execution (`/run`, Apps ➔ Run Code)
+Run Python 3, Node.js, or Bash code safely in ephemeral, isolated Docker containers with 4 flexible input methods:
+* **🪟 Interactive Multiline Modal Editor**: Run `/run` without arguments to pop up a full-screen paragraph editor with Enter-key newlines, indentation, and paste support (up to 4,000 characters).
+* **📁 Script File Attachment (`/run file:script.py`)**: Drag-and-drop `.py`, `.js`, or `.sh` script files directly to execute complete programs up to 50KB.
+* **⚡ Inline Quick-Run (`/run code:print(...)`)**: Instant single-line execution for fast math and one-liners.
+* **🖱️ Message Context Menu (`Apps ➔ Run Code Snippet`)**: Right-click any Discord message containing a ```python ... ``` code block to test-run it in Docker with 1 click.
+* **Security Constraints**: `--network none` (no internet access), `--memory 256m`, `--cpus 0.5`, `--pids-limit 50`, `--read-only`, 5.0s execution timeout. Gated to `dev` mode or channels with `allow_code_exec = true`.
 
 ### 🔊 10. Free Multi-Language Neural TTS & Voice Companion (`/tts`, `/voice`)
 * **Engine**: Microsoft Edge Neural TTS (`edge-tts`). Zero API cost.
@@ -273,6 +276,7 @@ Zauq/
 │       ├── test_info_command.py  # System Specifications /info Endpoint Test Suite
 │       ├── test_new_features.py  # Feature Validation Test Suite
 │       ├── test_reply_ingestion.py # Replied Reference Ingestion Test Suite
+│       ├── test_sandbox_suite.py # Multi-Input Sandbox & Context Menu Test Suite
 │       └── test_security_hardening.py # SSRF, Input Bounds & Auth Security Test Suite
 ├── bot/
 │   ├── api.py                    # Centralized Bot Backend API Client & Auth Headers
