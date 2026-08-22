@@ -484,7 +484,12 @@ async def on_message(message: discord.Message):
                     await target_channel.send(content=f"⚠️ *File attachment upload failed: {upload_err}*")
 
     except Exception as e:
-        await initial_msg.edit(content=f"❌ Error communicating with Zauq engine: {str(e)}")
+        err_msg = str(e) if str(e).strip() else (repr(e) or type(e).__name__)
+        logger.error(f"Error communicating with Zauq engine: {e}", exc_info=True)
+        try:
+            await initial_msg.edit(content=f"❌ Error communicating with Zauq engine: {err_msg}")
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     token = settings.DISCORD_BOT_TOKEN
