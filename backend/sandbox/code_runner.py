@@ -15,11 +15,11 @@ async def is_docker_available() -> bool:
         return False
     try:
         proc = await asyncio.create_subprocess_exec(
-            "docker", "info",
+            "docker", "ps",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
-        await asyncio.wait_for(proc.wait(), timeout=2.0)
+        await asyncio.wait_for(proc.wait(), timeout=10.0)
         return proc.returncode == 0
     except Exception:
         return False
