@@ -38,24 +38,28 @@ async def run_reply_ingestion_tests():
 
     # 4. Test Chat Engine Processing with Replied Reference
     print("4. Testing Backend Chat Completion with Ingested Reference Context...")
-    req = ChatRequest(
-        channel_id="test_channel_reply_999",
-        messages=[
-            {
-                "role": "user",
-                "content": user_reply_with_context
-            }
-        ],
-        mode_override="hangout"
-    )
-    bg = BackgroundTasks()
-    res = await chat_completion(req, bg)
-    assert "response" in res, "No response returned from chat_completion"
-    response_text = res.get("response", "")
-    print(f"   AI Response Preview ({len(response_text)} chars):")
-    print(f"   \"{response_text[:200]}...\"")
-    assert len(response_text) > 10, "Response too short"
-    print("   ✅ End-to-end chat completion with referenced context passed.\n")
+    from backend.config import settings
+    if not settings.GEMINI_API_KEY:
+        print("   ⚠️ SKIP: GEMINI_API_KEY not found in environment. Skipping live API call for CI.")
+    else:
+        req = ChatRequest(
+            channel_id="test_channel_reply_999",
+            messages=[
+                {
+                    "role": "user",
+                    "content": user_reply_with_context
+                }
+            ],
+            mode_override="hangout"
+        )
+        bg = BackgroundTasks()
+        res = await chat_completion(req, bg)
+        assert "response" in res, "No response returned from chat_completion"
+        response_text = res.get("response", "")
+        print(f"   AI Response Preview ({len(response_text)} chars):")
+        print(f"   \"{response_text[:200]}...\"")
+        assert len(response_text) > 10, "Response too short"
+        print("   ✅ End-to-end chat completion with referenced context passed.\n")
 
     print("🎉 ALL REPLIED MESSAGE & IN-CHANNEL TESTS PASSED! (100% PASS RATE)")
 
