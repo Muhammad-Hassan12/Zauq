@@ -145,7 +145,7 @@ Zauq maintains context across 3 distinct memory layers:
 
 ### L1 — Working Context Window
 - Automatically fetches the last **8 messages** in a thread or channel.
-- Auto-spawns a Discord Thread when a user mentions Zauq in a main channel to keep multi-turn conversations organized.
+- Direct in-channel replies by default with automatic thread continuity when chatting inside threads or upon explicit request.
 - Intelligent message chunking: messages over 1,900 characters are split at line breaks and code block boundaries to preserve Markdown formatting.
 
 ### L2 — User Episodic Facts (`user_memories`)
@@ -160,15 +160,23 @@ Zauq maintains context across 3 distinct memory layers:
 
 ---
 
-## 📜 8. Complete Slash Command Reference (25 Command Groups · 33 Actions)
+## 📜 8. Complete Slash Command Reference (26 Command Groups · 34 Actions)
 
 ### 🎯 Core & Mode Commands
 
 | Command | Description | Usage Example |
 |---|---|---|
+| `/info` | View complete live specifications, active model tier, mode, and engine parameters | `/info` |
 | `/mode` | Switch channel or community server operating mode | `/mode mode:dev scope:Server` or `/mode mode:hangout` |
 | `/mode_reset` | Clear channel mode override and revert to community default | `/mode_reset` |
 | `/summarize` | Summarize the current thread/channel into bullet points | `/summarize length:brief` or `/summarize length:detailed` |
+
+**`/info`** — Displays a comprehensive, categorized system dashboard showing:
+- **Engine & Attribution**: Engine version (`v3.2.0`), Apache 2.0 license, and creator attribution (`Syed Muhammad Hassan / AgenticEra Systems`).
+- **Active Model & Tier**: Current tier number (Tier 1/2/3), provider (Google AI Studio, DigitalOcean, Ollama, Kaggle), model name, and configuration scope (`Channel-Specific Override` vs `Community Server Default`).
+- **Operating Mode & Execution**: Active mode (`Dev Mode` vs `Hangout Mode`), temperature setting, and Docker sandbox code execution status.
+- **Context & Hardware Bounds**: 30,000 token input capacity (~120k chars), 8,192 token output limit (~32k chars), 8-message working window, and Docker limits (`--network none`, `256MB RAM`, `0.5 CPU`).
+- **Intelligence Subsystems**: Web Search (Deep Roaming + Grounding), Voice TTS (19 voices, 8 languages), Image Gen, and 3-Layer pgvector memory.
 
 **`/mode`** — Switches operating mode between Dev Mode (technical, low temp) and Hangout Mode (casual, high temp). Supports `scope: Channel` (affects current channel only) or `scope: Server` (sets permanent community default for all unconfigured channels). Requires administrator or authorized role.
 

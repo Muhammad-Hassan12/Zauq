@@ -192,3 +192,74 @@ async def reset_model_selection(channel_id: str):
         "cleared": success,
         "detail": "Channel model override cleared. Channel will now inherit the community server default."
     }
+
+@router.get("/info")
+async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
+    """
+    Returns complete live specifications, active model tier, mode, and capabilities.
+    """
+    # 1. Resolve Model Selection & Scope
+    status_data = await get_model_status(channel_id, guild_id)
+    tier = status_data.get("tier", 1)
+    provider = status_data.get("provider", "gemini")
+    model_name = status_data.get("model_name", "gemini-2.5-flash")
+    scope = status_data.get("scope", "system")
+
+    # 2. Resolve Operating Mode & Sandbox Execution
+    channel_profile = await db_helper.get_channel_profile(channel_id)
+    if channel_profile:
+        mode = channel_profile.get("operating_mode", "hangout")
+        temp = float(channel_profile.get("temperature", 0.2 if mode == "dev" else 0.75))
+        allow_code_exec = channel_profile.get("allow_code_exec", mode == "dev")
+    else:
+        guild_cfg = await db_helper.get_guild_config(guild_id) if (guild_id and guild_id != "dm") else None
+        if guild_cfg and guild_cfg.get("default_mode"):
+            mode = guild_cfg.get("default_mode", "hangout")
+            temp = 0.2 if mode == "dev" else 0.75
+            allow_code_exec = (mode == "dev")
+        else:
+            mode = "hangout"
+            temp = 0.75
+            allow_code_exec = False
+
+    return {
+        "engine": {
+            "name": "Zauq (ذوق)",
+            "version": "3.2.0",
+            "creator": "Syed Muhammad Hassan / AgenticEra Systems",
+            "license": "Apache License 2.0",
+            "backend_port": 8002,
+            "status": "online"
+        },
+        "model": {
+            "tier": tier,
+            "provider": provider,
+            "model_name": model_name,
+            "scope": scope,
+            "is_channel_override": status_data.get("is_channel_override", False),
+            "is_server_default": status_data.get("is_server_default", False),
+            "updated_by": status_data.get("updated_by", "System")
+        },
+        "persona": {
+            "mode": mode,
+            "temperature": temp,
+            "allow_code_exec": allow_code_exec
+        },
+        "limits": {
+            "input_tokens_max": 30000,
+            "input_chars_max": 120000,
+            "output_tokens_max": 8192,
+            "history_window": 8,
+            "sandbox_timeout_s": 5.0,
+            "sandbox_memory": "256m",
+            "sandbox_cpus": "0.5"
+        },
+        "capabilities": {
+            "web_search": "Deep Web Roaming + Google Grounding + DuckDuckGo",
+            "voice_tts": "Microsoft Edge Neural TTS (19 Voices, 8 Languages)",
+            "image_generation": "Gemini Flash Image (Free) / DigitalOcean SD3.5",
+            "memory": "L1 (8 msgs) · L2 (768-dim user facts) · L3 (pgvector lore)",
+            "ssrf_protection": "Active (DNS Filter & Private IP Blocking)",
+            "multimodal": "Voice Notes (Urdu/English/etc), PDFs, DOCX, Code, Images"
+        }
+    }

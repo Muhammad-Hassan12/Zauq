@@ -178,7 +178,8 @@ async def on_ready():
             "bot.commands.moderation_slash",
             "bot.commands.admin_slash",
             "bot.commands.search_slash",
-            "bot.commands.file_slash"
+            "bot.commands.file_slash",
+            "bot.commands.info_slash"
         ]
         for cog in cogs:
             try:
@@ -271,11 +272,79 @@ async def on_message(message: discord.Message):
             except Exception as att_err:
                 logger.warning(f"Failed to read attachment {att.filename}: {att_err}")
 
+    # 2. Ingest Replied-to Reference Message (if this message is a Reply)
+    ref_context_parts = []
+    if message.reference:
+        ref_msg = None
+        if getattr(message.reference, "resolved", None) and isinstance(message.reference.resolved, discord.Message):
+            ref_msg = message.reference.resolved
+        elif message.reference.message_id:
+            try:
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+            except Exception as ref_err:
+                logger.debug(f"Could not fetch referenced message {message.reference.message_id}: {ref_err}")
+
+        if ref_msg:
+            ref_author = ref_msg.author.display_name
+            ref_text = ref_msg.content or ""
+
+            # Extract content and URLs from embeds inside the referenced message
+            for emb in ref_msg.embeds:
+                if emb.url and emb.url not in ref_text:
+                    ref_text += f"\n{emb.url}"
+                if emb.title:
+                    ref_text += f"\n{emb.title}"
+                if emb.description:
+                    ref_text += f"\n{emb.description}"
+
+            if ref_text.strip():
+                ref_context_parts.append(f"[Replied to @{ref_author}'s message:\n\"{ref_text.strip()}\"]")
+
+            # Extract attachments from referenced message (images, audio, docs)
+            if ref_msg.attachments:
+                for att in ref_msg.attachments[:3]:
+                    try:
+                        if att.size <= 10 * 1024 * 1024:
+                            att_bytes = await att.read()
+                            b64_str = base64.b64encode(att_bytes).decode("utf-8")
+                            ext = os.path.splitext(att.filename.lower())[1]
+                            mime = att.content_type or ""
+                            if ext in AUDIO_EXTENSIONS or mime.startswith("audio/"):
+                                is_voice_input = True
+                            attachments_payload.append({
+                                "filename": f"replied_{att.filename}",
+                                "content_type": mime,
+                                "bytes_b64": b64_str
+                            })
+                    except Exception as ref_att_err:
+                        logger.warning(f"Failed to read referenced attachment {att.filename}: {ref_att_err}")
+
+    # 3. Ingest Forwarded Message Snapshots (Discord message forwards)
+    if hasattr(message, "message_snapshots") and message.message_snapshots:
+        for snapshot in message.message_snapshots:
+            if getattr(snapshot, "content", None):
+                ref_context_parts.append(f"[Forwarded message content:\n\"{snapshot.content.strip()}\"]")
+            for att in getattr(snapshot, "attachments", [])[:3]:
+                try:
+                    if att.size <= 10 * 1024 * 1024:
+                        att_bytes = await att.read()
+                        b64_str = base64.b64encode(att_bytes).decode("utf-8")
+                        attachments_payload.append({
+                            "filename": f"forwarded_{att.filename}",
+                            "content_type": att.content_type or "",
+                            "bytes_b64": b64_str
+                        })
+                except Exception as snap_err:
+                    logger.warning(f"Failed to read forwarded attachment: {snap_err}")
+
+    if ref_context_parts:
+        content = "\n\n".join(ref_context_parts) + f"\n\n[User's reply]: {content}"
+
     # If user sent a voice note without a text caption
     if not content:
         content = "[Voice Note Audio Input]" if is_voice_input else "Hello!"
 
-    # 3. AI Moderation Check
+    # 4. AI Moderation Check
     if message.guild and content != "[Voice Note Audio Input]":
         try:
             mod_payload = {
@@ -299,16 +368,26 @@ async def on_message(message: discord.Message):
             pass
 
     target_channel = message.channel
+    wants_thread = any(kw in content.lower() for kw in ["start a thread", "in a thread", "make a thread", "thread:"])
 
-    # Auto-spawn a Discord Thread if multi-turn conversation starts in a standard channel
-    if not is_thread and not is_dm:
+    # Spawn a Discord Thread only if explicitly requested by the user
+    if wants_thread and not is_thread and not is_dm:
         try:
             thread_name = f"Zauq Chat - {message.author.display_name[:15]}"
             target_channel = await message.create_thread(name=thread_name, auto_archive_duration=60)
+            initial_msg = await target_channel.send("💭 *Thinking...*")
         except Exception as e:
-            logger.warning(f"Could not spawn thread: {e}")
-
-    initial_msg = await target_channel.send("💭 *Thinking...*")
+            logger.warning(f"Could not spawn requested thread: {e}")
+            try:
+                initial_msg = await message.reply("💭 *Thinking...*", mention_author=False)
+            except Exception:
+                initial_msg = await target_channel.send("💭 *Thinking...*")
+    else:
+        # Default: Clean in-channel reply without creating unwanted threads
+        try:
+            initial_msg = await message.reply("💭 *Thinking...*", mention_author=False)
+        except Exception:
+            initial_msg = await target_channel.send("💭 *Thinking...*")
 
     # Fetch history context (last 8 messages)
     history_messages = []

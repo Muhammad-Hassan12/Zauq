@@ -170,10 +170,11 @@ Run Python, Node.js, or Bash code safely in ephemeral Docker containers:
 
 ---
 
-## 📜 Complete Slash Command Reference (25 Command Groups · 33 Actions)
+## 📜 Complete Slash Command Reference (26 Command Groups · 34 Actions)
 
 | Command | Category | Description |
 |---|---|---|
+| `/info` | Core | View complete live specifications, active model tier, mode, and engine parameters. |
 | `/mode` | Core | Switch channel or server operating mode (`dev` or `hangout`). |
 | `/mode_reset` | Core | Clear channel mode override and revert to community default. |
 | `/summarize` | Core | Summarize thread or channel discussion into bullet points. |
@@ -268,12 +269,15 @@ Zauq/
 │       ├── __init__.py           # Package Initializer
 │       ├── temp_manager.py       # Temp File Lifecycle Manager (Auto-Cleanup Worker)
 │       ├── test_community_config.py # Server/Channel Scope & RBAC Test Suite
+│       ├── test_deep_search.py   # Deep Roaming & Multi-Query Search Test Suite
+│       ├── test_info_command.py  # System Specifications /info Endpoint Test Suite
 │       ├── test_new_features.py  # Feature Validation Test Suite
+│       ├── test_reply_ingestion.py # Replied Reference Ingestion Test Suite
 │       └── test_security_hardening.py # SSRF, Input Bounds & Auth Security Test Suite
 ├── bot/
 │   ├── api.py                    # Centralized Bot Backend API Client & Auth Headers
 │   ├── auth.py                   # Discord Permission & Upper-Role RBAC Verifier
-│   ├── client.py                 # Discord.py Gateway Bot, Voice Ingestion, File Delivery, !sync
+│   ├── client.py                 # Discord.py Gateway Bot, In-Channel Replies, Voice Ingestion, !sync
 │   ├── stream_buffer.py          # Intelligent Multi-Message Chunking (>1900 chars)
 │   ├── commands/
 │   │   ├── admin_slash.py        # /admin memory, /admin channels & /admin set_role Commands
@@ -282,6 +286,7 @@ Zauq/
 │   │   ├── file_slash.py         # /file generate & /create_file Commands
 │   │   ├── github_slash.py       # /github pr, /github issue & /ingest_repo Commands
 │   │   ├── image_slash.py        # /image AI Art Command (Gemini + DO)
+│   │   ├── info_slash.py         # /info System Specifications & Active Config Command
 │   │   ├── meme_slash.py         # /meme Local Meme Renderer Command
 │   │   ├── model_slash.py        # /model status, /model set & /model reset Commands
 │   │   ├── moderation_slash.py   # /moderation enable, sensitivity & log Commands
