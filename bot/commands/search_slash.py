@@ -66,7 +66,7 @@ class SearchSlash(commands.Cog):
         }
 
         try:
-            async with api_client(timeout=90.0) as client:
+            async with api_client(timeout=180.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/chat", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ Search failed ({res.status_code}): {res.text}")
@@ -90,8 +90,14 @@ class SearchSlash(commands.Cog):
                     for i in range(4000, len(response_text), 1900):
                         await interaction.followup.send(content=response_text[i:i+1900])
 
+        except httpx.TimeoutException:
+            await interaction.followup.send(
+                "⏳ **Search Timed Out**: Gathering multi-source web intelligence took too long. "
+                "Please try again or use a faster model like Gemini Flash via `/model set provider:gemini model:gemini-2.5-flash`!"
+            )
         except Exception as e:
-            await interaction.followup.send(f"❌ Error communicating with search engine: {str(e)}")
+            err_msg = str(e) if str(e).strip() else (repr(e) or type(e).__name__)
+            await interaction.followup.send(f"❌ Error communicating with search engine: {err_msg}")
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SearchSlash(bot))

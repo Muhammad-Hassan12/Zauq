@@ -140,7 +140,7 @@ class WebSearchEngine:
         # Method 1: Jina Reader (https://r.jina.ai/<url>)
         jina_url = f"https://r.jina.ai/{target_url}"
         try:
-            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
                 res = await client.get(jina_url, headers={"User-Agent": "Zauq-Bot/3.0"})
                 if res.status_code == 200 and len(res.text.strip()) > 50:
                     text = res.text.strip()
@@ -157,7 +157,7 @@ class WebSearchEngine:
                 if not is_safe_public_url(current_url):
                     return "[Access Denied: Redirected to restricted network address]"
 
-                async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+                async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as client:
                     res = await client.get(current_url, headers=self.headers)
                     if res.status_code in (301, 302, 303, 307, 308):
                         location = res.headers.get("Location")
