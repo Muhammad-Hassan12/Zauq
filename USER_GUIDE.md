@@ -7,7 +7,7 @@
 ## 📐 1. Architecture Overview
 
 Zauq is split into two isolated processes running under PM2:
-1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8002`. Handles AI prompt routing, vector embeddings, memory extraction, code execution sandboxing, web search grounding, media rendering, XP tracking, reminders, and content moderation.
+1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8***`. Handles AI prompt routing, vector embeddings, memory extraction, code execution sandboxing, web search grounding, media rendering, XP tracking, reminders, and content moderation.
 2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, voice notes, and 25 slash commands, sending requests to the FastAPI backend.
 
 ```
@@ -20,7 +20,7 @@ Zauq is split into two isolated processes running under PM2:
                          │   Zauq Bot (discord.py)   │
                          │   25 Slash Commands + XP  │
                          └─────────────┬─────────────┘
-                                       │ HTTP (Port 8002)
+                                       │ HTTP (Port 8***)
                          ┌─────────────▼─────────────┐
                          │   FastAPI Backend Engine  │
                          │  Router · Memory · Media  │
