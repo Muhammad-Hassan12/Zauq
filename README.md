@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/Zauq_Logo.png" alt="Zauq Logo" width="180px" style="border-radius: 20px; margin-bottom: 15px;" /><br />
+
 # 🤖 Zauq (ذوق) — Next-Gen Hybrid AI Discord Companion
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
@@ -305,6 +307,8 @@ Zauq/
 │   │   └── xp_slash.py           # /rank & /leaderboard Commands
 │   └── plugins/
 │       └── __init__.py           # Auto-Discovery Plugin Loader
+├── assets/
+│   └── Zauq_Logo.png             # Official Zauq Branding & Logo Asset
 ├── infra/
 │   └── pm2.config.js             # PM2 Production Ecosystem File (PYTHONPATH)
 ├── .github/
