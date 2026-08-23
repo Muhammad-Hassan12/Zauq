@@ -4,6 +4,7 @@ import zipfile
 import asyncio
 import logging
 import base64
+import httpx
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -424,7 +425,7 @@ async def on_message(message: discord.Message):
     }
 
     try:
-        async with api_client(timeout=180.0) as client:
+        async with api_client(timeout=240.0) as client:
             res = await client.post(f"{BACKEND_URL}/api/chat", json=chat_payload)
             if res.status_code != 200:
                 await initial_msg.edit(content=f"❌ Backend Error ({res.status_code}): {res.text}")
@@ -483,6 +484,15 @@ async def on_message(message: discord.Message):
                     logger.error(f"Failed to send Discord file attachments: {upload_err}")
                     await target_channel.send(content=f"⚠️ *File attachment upload failed: {upload_err}*")
 
+    except httpx.TimeoutException:
+        logger.error("Request to backend engine timed out after 240s.")
+        try:
+            await initial_msg.edit(
+                content="⏳ **Generation Timed Out**: The active AI model took too long to complete this complex request. "
+                        "Please try again, or switch to Gemini Flash via `/model set provider:gemini model:gemini-2.5-flash` for ultra-fast generation!"
+            )
+        except Exception:
+            pass
     except Exception as e:
         err_msg = str(e) if str(e).strip() else (repr(e) or type(e).__name__)
         logger.error(f"Error communicating with Zauq engine: {e}", exc_info=True)
