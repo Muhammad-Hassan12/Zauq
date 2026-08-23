@@ -39,7 +39,7 @@ Zauq uses a decoupled architecture to guarantee 99.9% uptime, zero Gateway block
                          │     Zauq Bot (discord.py)       │
                          │   25 Commands · RBAC · XP       │
                          └────────────────┬────────────────┘
-                                          │ HTTP (Port 8002)
+                                          │ HTTP (Port 8***)
                          ┌────────────────▼────────────────┐
                          │     FastAPI Backend Engine      │
                          │ Router · Memory · Media · Search│
