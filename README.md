@@ -307,11 +307,19 @@ Zauq/
 │       └── __init__.py           # Auto-Discovery Plugin Loader
 ├── infra/
 │   └── pm2.config.js             # PM2 Production Ecosystem File (PYTHONPATH)
+├── .github/
+│   ├── workflows/ci.yml          # GitHub Actions Automated CI/CD Test Pipeline
+│   └── ISSUE_TEMPLATE/           # Standard Bug Report & Feature Request Templates
 ├── .env.example                  # Environment Configuration Template
 ├── requirements.txt              # Python Package Dependencies
+├── docker-compose.yml            # 1-Click Multi-Container Deployment Orchestration
+├── Dockerfile.backend            # Container Image for FastAPI Backend + Docker CLI
+├── Dockerfile.bot                # Container Image for Discord Bot
 ├── USER_GUIDE.md                 # Complete User Manual (v3.0)
 ├── DEPLOYMENT.md                 # Deployment & Infrastructure Guide
+├── CONTRIBUTING.md               # Community Contribution & Testing Guidelines
 ├── PRIVACY.md                    # Privacy Policy Document
+├── NOTICE.md                     # Trademark, Branding & Third-Party Terms Notice
 ├── LICENSE                       # Apache License 2.0
 └── README.md                     # Open-Source Project Documentation (v3.0)
 ```
