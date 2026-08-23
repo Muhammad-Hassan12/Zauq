@@ -39,6 +39,7 @@ class ChatRequest(BaseModel):
     enable_web_search: Optional[bool] = None
     deep_search: Optional[bool] = False
     search_category: Optional[str] = "all"
+    search_query: Optional[str] = None
 
     @field_validator('messages')
     @classmethod
@@ -239,21 +240,33 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
             except Exception as url_err:
                 logger.info(f"URL scrape failed for {u}: {url_err}")
 
-    # If deep search is explicitly requested or domain category is specified, enrich context with Deep Web Roaming
-    if req.messages and (req.deep_search or (req.search_category and req.search_category != "all")):
+    # If web search or deep search is requested, enrich context with Deep Web Roaming
+    if req.messages and (req.deep_search or req.enable_web_search or (req.search_category and req.search_category != "all")):
         target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
         user_text = target_user_msg.get("content", "")
+        
+        # Extract the pure search query
+        raw_search_q = req.search_query or user_text
+        if 'following query: "' in raw_search_q:
+            match = re.search(r'following query:\s*"([^"]+)"', raw_search_q)
+            if match:
+                raw_search_q = match.group(1)
+        elif 'following query: \'' in raw_search_q:
+            match = re.search(r"following query:\s*'([^']+)'", raw_search_q)
+            if match:
+                raw_search_q = match.group(1)
+
         search_data = await web_search_engine.deep_search_and_roam(
-            query=user_text,
+            query=raw_search_q,
             max_results=5,
             roam_top_n=3 if req.deep_search else 2,
             category=req.search_category or "all"
         )
         if search_data.get("context_text"):
             target_user_msg["content"] += (
-                f"\n\n[Autonomous Deep Web Research Context]:\n"
+                f"\n\n[Autonomous Deep Web Research Context & Live Sources]:\n"
                 f"{search_data['context_text']}\n\n"
-                "Synthesize a well-structured, authoritative, and detailed research answer with citations based on the sources above."
+                "Synthesize a well-structured, authoritative, and comprehensive answer strictly utilizing the live research sources provided above. Include relevant markdown citations."
             )
 
     try:

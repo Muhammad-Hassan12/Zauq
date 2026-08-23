@@ -56,12 +56,13 @@ class SearchSlash(commands.Cog):
             "messages": [
                 {
                     "role": "user",
-                    "content": f"Search the live web ({cat_val} domain) for the following query: \"{query}\". {deep_directive}"
+                    "content": f"Please research and answer: \"{query}\". {deep_directive}"
                 }
             ],
             "enable_web_search": True,
             "deep_search": deep,
-            "search_category": cat_val
+            "search_category": cat_val,
+            "search_query": query
         }
 
         try:

@@ -229,12 +229,24 @@ async def on_message(message: discord.Message):
     except Exception:
         pass
 
-    # 2. Check if message warrants bot response (Mention, DM, or Thread)
+    # 2. Check if message warrants bot response (Mention, DM, Thread, or Direct Reply to Bot)
     is_mentioned = bot.user in message.mentions
     is_dm = isinstance(message.channel, discord.DMChannel)
     is_thread = isinstance(message.channel, discord.Thread)
 
-    if not (is_mentioned or is_dm or is_thread):
+    is_reply_to_bot = False
+    if message.reference:
+        if getattr(message.reference, "resolved", None) and isinstance(message.reference.resolved, discord.Message):
+            is_reply_to_bot = (message.reference.resolved.author.id == bot.user.id)
+        elif message.reference.message_id:
+            try:
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                if ref_msg and ref_msg.author.id == bot.user.id:
+                    is_reply_to_bot = True
+            except Exception:
+                pass
+
+    if not (is_mentioned or is_dm or is_thread or is_reply_to_bot):
         return
 
     # If it was a prefix command like !sync, don't trigger AI response
