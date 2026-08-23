@@ -19,7 +19,7 @@
 
 **Zauq (ذوق)** is an enterprise-ready, open-source AI Discord assistant built by **Syed Muhammad Hassan / AgenticEra Systems**. Designed around a decoupled, microservice-inspired architecture, Zauq separates Discord WebSocket event handling from AI reasoning. 
 
-It connects a lightweight `discord.py` gateway thin client to an ultra-fast **FastAPI backend engine** running locally under PM2 on Port **8002**.
+It connects a lightweight `discord.py` gateway thin client to an ultra-fast **FastAPI backend engine** running locally under PM2 (configurable via `BACKEND_PORT` in `.env`).
 
 Zauq supports multi-turn conversational memory, automatic document text parsing (`.pdf`, `.docx`, `.xlsx`, `.txt`, `.py`, `.png`), sandboxed code execution inside isolated Docker containers, free neural text-to-speech with 19 voices across 8 languages, free AI image generation via Gemini, an XP/reputation leaderboard system, AI-powered content moderation, scheduled reminders, conversation export, and server lore RAG vector search.
 
@@ -39,7 +39,7 @@ Zauq uses a decoupled architecture to guarantee 99.9% uptime, zero Gateway block
                          │     Zauq Bot (discord.py)       │
                          │   25 Commands · RBAC · XP       │
                          └────────────────┬────────────────┘
-                                          │ HTTP (Port 8002)
+                                          │ HTTP (Port 8***)
                          ┌────────────────▼────────────────┐
                          │     FastAPI Backend Engine      │
                          │ Router · Memory · Media · Search│
