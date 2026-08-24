@@ -338,7 +338,7 @@ The easiest way to self-host Zauq is using Docker Compose. This automatically sp
 
 1. **Clone and Configure**:
 ```bash
-git clone https://github.com/YOUR-USERNAME/Zauq.git
+git clone https://github.com/Muhammad-Hassan12/Zauq.git
 cd Zauq
 cp .env.example .env
 nano .env # Fill in your tokens
@@ -361,7 +361,7 @@ If you prefer to run Zauq directly on your host machine (e.g. Ubuntu VPS) using 
 
 #### 1. Clone Repository & Environment Setup
 ```bash
-git clone https://github.com/YOUR-USERNAME/Zauq.git
+git clone https://github.com/Muhammad-Hassan12/Zauq.git
 cd Zauq
 
 cp .env.example .env
