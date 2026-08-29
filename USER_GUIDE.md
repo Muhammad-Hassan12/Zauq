@@ -61,29 +61,31 @@ Zauq operates in two distinct modes configured via `/mode` at either **Channel**
 
 ---
 
-## 🧠 3. Thinking Mode (`/thinking`) *(v3.2.5 New)*
+## 🧠 3. Universal Thinking Mode (`/thinking`) *(v3.2.5 New)*
 
-Zauq supports Gemini's **extended deep-thinking** capability, togglable per channel by administrators.
+Zauq supports **extended deep-thinking and reasoning mode**, togglable per channel by administrators across **all AI models**:
 
-### What is Thinking Mode?
-When enabled, Gemini internally reasons through a problem step-by-step using up to **16,384 dedicated thinking tokens** before producing its final response. The internal reasoning is **never shown** to users — only the polished final answer is delivered.
+### How Thinking Mode Works
+- **Gemini Models**: Allocates up to **16,384 dedicated thinking tokens** via Google's native `thinkingConfig` API budget.
+- **DigitalOcean (Kimi, GLM, DeepSeek, Qwen), Ollama & Kaggle**: Injects Deep Chain-of-Thought (CoT) multi-phase reasoning directives and automatically expands output token bounds (up to 32k tokens).
+- **Internal Scratchpads Hidden**: Any `<thought>` or `<think>` tags generated internally are automatically stripped before sending to Discord — only the polished final answer is delivered.
 
 This significantly improves response quality for:
-- Complex multi-step technical problems
-- Logical and mathematical reasoning
-- Code architecture decisions
-- Detailed research synthesis
+- Complex multi-step technical problems & multi-GPU training scripts
+- Logical, mathematical, and algorithmic reasoning
+- Full-stack codebase architecture decisions
+- Detailed scientific and technical research synthesis
 
 ### Usage
 ```
-/thinking mode:on   -> Enable Gemini deep reasoning for this channel
+/thinking mode:on   -> Enable deep reasoning for this channel (all AI models)
 /thinking mode:off  -> Disable thinking mode, return to fast standard output
 ```
 
-> Requires **Administrator** permission or designated admin role. Only applies to Gemini models — DigitalOcean, Ollama, and Kaggle providers silently ignore this flag.
+> Requires **Administrator** permission or designated admin role.
 
 ### Output Tokens (v3.2.5)
-Gemini's output token limit has been raised from **8,192 → 65,536 tokens** (full Gemini 2.5 capacity), giving Zauq the ability to generate comprehensive long-form responses, full project codebases, and detailed reports without truncation.
+Output token limit is up to **65,536 tokens** (full Gemini capacity) and up to **32,768 tokens** for DigitalOcean/Ollama reasoning models, giving Zauq the ability to generate comprehensive long-form responses, full project codebases, and complete Jupyter notebooks without truncation.
 
 ---
 
@@ -94,7 +96,7 @@ Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit l
 | Tier | Provider Identifier | Display Name | Supported Models |
 |---|---|---|---|
 | Tier 1 | `gemini` (alias `google`) | Google AI Studio | `gemini-2.5-flash` (Default), `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-pro-preview`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it` + Google Search Grounding |
-| Tier 1 | `digitalocean` | DigitalOcean Gradient | `llama3.3-70b-instruct` (Default), `glm-5.2`, `glm-5.1`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `kimi-k3` |
+| Tier 1 | `digitalocean` | DigitalOcean Gradient | `kimi-k3`, `kimi-k2.6`, `kimi-k2.5`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `deepseek-v4-pro`, `deepseek-4-flash`, `deepseek-3.2`, `qwen3.8-max`, `qwen3.5-397b-a17b`, `llama-4-maverick`, `llama3.3-70b-instruct`, `minimax-m2.5`, `nemotron-3-ultra-550b` |
 | Tier 2 | `ollama` | Local VPS Model | `qwen3.5:4b` (zero API cost) |
 | Tier 3 | `kaggle` | Kaggle T4 Tunnel | `qwen3.5-t4` (pings `/health` before locking) |
 
@@ -254,10 +256,10 @@ Every user fact is now a true **living vector memory** — not just a stored str
 
 **`/summarize`** — Fetches the last 50 messages from the current channel or thread and sends them to the active AI model with a summarization prompt. Returns a clean bullet-point summary embed. Supports `brief` (3-5 bullet points) and `detailed` (comprehensive) modes.
 
-**`/thinking`** *(v3.2.5 New)* — Toggles Gemini's extended deep-reasoning mode for the current channel:
-- **`mode:on`** → Enables 16,384-token thinking budget. Gemini reasons internally before responding. Ideal for complex technical questions, architecture decisions, and research tasks.
+**`/thinking`** *(v3.2.5 New)* — Toggles extended deep-reasoning mode for the current channel across all AI models:
+- **`mode:on`** → Enables deep reasoning mode (16k–32k token budgets). The model reasons systematically before responding. Ideal for complex technical questions, Kaggle/GPU architectures, and research tasks.
 - **`mode:off`** → Disables thinking mode. Faster standard output.
-- Only applies to Gemini models. Requires admin or authorized role.
+- Works across all model tiers (Gemini, DigitalOcean, Ollama, Kaggle). Requires admin or authorized role.
 
 ---
 

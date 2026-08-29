@@ -108,18 +108,19 @@ Channels operate in per-channel modes saved to Supabase `channel_profiles`:
 Zauq rejects unreliable cascade fallbacks in favor of **explicit locking**. Channels stay locked to the chosen model provider:
 * **Tier 1 (Cloud Primary)**:
   * **Google AI Studio (`gemini` / `google`)**: `gemini-2.5-flash` (Default), `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-pro-preview`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it` + Google Search Grounding.
-  * **DigitalOcean Gradient (`digitalocean`)**: `llama3.3-70b-instruct` (Default), `glm-5.2`, `glm-5.1`, `deepseek-v4-pro`, `deepseek-4-flash`, `qwen3.5-397b-a17b`, `kimi-k3`.
+  * **DigitalOcean Gradient (`digitalocean`)**: `kimi-k3`, `kimi-k2.6`, `kimi-k2.5`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `deepseek-v4-pro`, `deepseek-4-flash`, `deepseek-3.2`, `qwen3.8-max`, `qwen3.5-397b-a17b`, `llama-4-maverick`, `llama3.3-70b-instruct`, `minimax-m2.5`, `nemotron-3-ultra-550b`.
 * **Tier 2 (Local VPS)**: Local Ollama server (`ollama`: `qwen3.5:4b` - zero API cost).
 * **Tier 3 (Batch GPU)**: Cloudflared tunneled Kaggle T4 worker (`kaggle`: `qwen3.5-t4` - pings `/health` before locking).
 
 > **⚠️ Transparent Fallback Alerts**: When a configured provider (DigitalOcean, Ollama, Kaggle) fails and Gemini Flash is substituted, Zauq sends a visible **orange embed notification** after the response so users always know what model served them.
 
-### 🧠 5. `/thinking` — Gemini Extended Reasoning Mode *(v3.2.5 New)*
-Toggle Gemini's deep extended-thinking capability per channel. When enabled, Gemini reasons internally with up to **16,384 dedicated thinking tokens** before outputting a response — delivering significantly more thorough, accurate, and logically sound answers for complex tasks.
-* **Command**: `/thinking mode:on` (admin only, per-channel scope)
-* **Output tokens**: up to **65,536 tokens** (raised from 8,192) giving Gemini full room to generate comprehensive answers
-* Internal `<thought>` blocks are automatically stripped — thinking never leaks to users
-* Non-Gemini providers (DigitalOcean, Ollama, Kaggle) silently ignore the flag
+### 🧠 5. `/thinking` — Universal Extended Reasoning & Thinking Mode *(v3.2.5 New)*
+Toggle deep extended-thinking reasoning per channel across **all model providers**:
+* **Gemini Models**: Allocates up to **16,384 dedicated thinking tokens** via native `thinkingConfig` API budget.
+* **DigitalOcean (Kimi, GLM, DeepSeek, Qwen), Ollama & Kaggle**: Injects Deep Chain-of-Thought (CoT) multi-phase reasoning directives with expanded token allowances (up to 32k tokens).
+* **Zero Leakage**: Internal `<thought>` and `<think>` scratchpad blocks are automatically sanitized so internal thinking never leaks to chat.
+* **Command**: `/thinking mode:on` (admin only, per-channel scope).
+* **Output tokens**: up to **65,536 tokens** giving models full room to generate comprehensive, un-truncated answers.
 
 ### 📄 6. Universal Document, Vision & Voice Note Ingestion (30,000 Token Capacity)
 Upload any document, code file, image, or voice note directly to Discord! Zauq's parsing engine supports up to **120,000 characters (~30,000 tokens / ~3,000+ lines of text)** per document:
