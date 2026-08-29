@@ -194,12 +194,18 @@ def extract_generated_files(response_text: str) -> Tuple[str, List[Dict[str, Any
         }
         return ext_map.get(ext, "")
 
-    # Pattern 1: <zauq_file filename="...">...</zauq_file>
-    tag_pattern = r'<zauq_file\s+filename=["\']([^"\']+)["\']>(.*?)</zauq_file>'
+    # Pattern 1: <zauq_file filename="...">...</zauq_file> or unclosed <zauq_file filename="...">...
+    tag_pattern = r'<zauq_file\s+filename=["\']([^"\']+)["\']>(.*?)(?:</zauq_file>|\Z)'
     
     def tag_replacer(match: re.Match) -> str:
         filename = match.group(1).strip()
         code_content = match.group(2).strip()
+        # If code_content is wrapped inside a fenced code block, strip the outer fences
+        if code_content.startswith("```") and code_content.endswith("```"):
+            lines = code_content.split("\n")
+            if len(lines) >= 2:
+                code_content = "\n".join(lines[1:-1]).strip()
+
         if filename and code_content and filename not in seen_filenames:
             seen_filenames.add(filename)
             mime, _ = mimetypes.guess_type(filename)
@@ -219,6 +225,8 @@ def extract_generated_files(response_text: str) -> Tuple[str, List[Dict[str, Any
                 preview_lines = code_content.split("\n")[:25]
                 preview_snippet = "\n".join(preview_lines)
                 return f"\n\n📄 **Generated File:** `{filename}` *(full file attached below)*\n```{lang}\n{preview_snippet}\n... [Full code in attached {filename}]\n```\n"
+        elif filename and not code_content:
+            return ""
         return ""
 
     cleaned_text = re.sub(tag_pattern, tag_replacer, response_text, flags=re.DOTALL)
