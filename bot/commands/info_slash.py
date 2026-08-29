@@ -53,11 +53,12 @@ class InfoSlash(commands.Cog):
                 mode_badge = "🛠️ Dev Mode" if mode_name == "dev" else "💬 Hangout Mode"
                 temp = persona.get("temperature", 0.75)
                 exec_badge = "✅ Enabled (Docker Sandbox)" if persona.get("allow_code_exec") else "❌ Disabled"
+                thinking_badge = "🧠 Enabled (16k Budget)" if persona.get("thinking_enabled") else "⚡ Disabled"
 
                 embed = discord.Embed(
                     title="🤖 Zauq (ذوق) — System Specifications & Active Configuration",
                     description=(
-                        f"**Engine:** `{engine.get('name', 'Zauq')}` v`{engine.get('version', '3.2.0')}` • `{engine.get('license', 'Apache 2.0')}`\n"
+                        f"**Engine:** `{engine.get('name', 'Zauq')}` v`{engine.get('version', '3.2.5')}` • `{engine.get('license', 'Apache 2.0')}`\n"
                         f"**Architect:** `{engine.get('creator', 'Syed Muhammad Hassan / AgenticEra Systems')}`\n"
                         f"**Channel:** <#{channel_id}>"
                     ),
@@ -77,6 +78,7 @@ class InfoSlash(commands.Cog):
                 persona_field_val = (
                     f"• **Mode:** {mode_badge}\n"
                     f"• **Temperature:** `{temp}` ({'Deterministic' if temp <= 0.3 else 'Creative/Witty'})\n"
+                    f"• **Thinking Mode:** {thinking_badge}\n"
                     f"• **Code Execution:** {exec_badge}"
                 )
                 embed.add_field(name="🎭 Persona & Execution", value=persona_field_val, inline=False)
@@ -84,7 +86,7 @@ class InfoSlash(commands.Cog):
                 # 3. Context Windows & Hardware Sandbox Limits
                 limits_field_val = (
                     f"• **Input Capacity:** `{limits.get('input_tokens_max', 30000):,} Tokens` (~120k chars)\n"
-                    f"• **Output Generation:** `{limits.get('output_tokens_max', 8192):,} Tokens` (~32k chars)\n"
+                    f"• **Output Generation:** `{limits.get('output_tokens_max', 65536):,} Tokens` (~250k chars)\n"
                     f"• **Working Context:** Last `{limits.get('history_window', 8)} messages`\n"
                     f"• **Sandbox Bounds:** `{limits.get('sandbox_timeout_s', 5.0)}s timeout` • `{limits.get('sandbox_memory', '256m')}` • `{limits.get('sandbox_cpus', '0.5')} CPU`"
                 )

@@ -207,6 +207,7 @@ async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
 
     # 2. Resolve Operating Mode & Sandbox Execution
     channel_profile = await db_helper.get_channel_profile(channel_id)
+    thinking_enabled = bool(channel_profile.get("thinking_enabled", False)) if channel_profile else False
     if channel_profile:
         mode = channel_profile.get("operating_mode", "hangout")
         temp = float(channel_profile.get("temperature", 0.2 if mode == "dev" else 0.75))
@@ -225,7 +226,7 @@ async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
     return {
         "engine": {
             "name": "Zauq (ذوق)",
-            "version": "3.2.0",
+            "version": "3.2.5",
             "creator": "Syed Muhammad Hassan / AgenticEra Systems",
             "license": "Apache License 2.0",
             "backend_port": 8002,
@@ -243,12 +244,13 @@ async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
         "persona": {
             "mode": mode,
             "temperature": temp,
-            "allow_code_exec": allow_code_exec
+            "allow_code_exec": allow_code_exec,
+            "thinking_enabled": thinking_enabled
         },
         "limits": {
             "input_tokens_max": 30000,
             "input_chars_max": 120000,
-            "output_tokens_max": 8192,
+            "output_tokens_max": 65536,
             "history_window": 8,
             "sandbox_timeout_s": 5.0,
             "sandbox_memory": "256m",
@@ -258,7 +260,7 @@ async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
             "web_search": "Deep Web Roaming + Google Grounding + DuckDuckGo",
             "voice_tts": "Microsoft Edge Neural TTS (19 Voices, 8 Languages)",
             "image_generation": "Gemini Flash Image (Free) / DigitalOcean SD3.5",
-            "memory": "L1 (8 msgs) · L2 (768-dim user facts) · L3 (pgvector lore)",
+            "memory": "L1 (8 msgs) · L2 (768-dim vector facts + decay) · L3 (pgvector lore)",
             "ssrf_protection": "Active (DNS Filter & Private IP Blocking)",
             "multimodal": "Voice Notes (Urdu/English/etc), PDFs, DOCX, Code, Images"
         }

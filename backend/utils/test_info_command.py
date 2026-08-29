@@ -29,12 +29,12 @@ async def run_info_tests():
     model = info_data["model"]
     limits = info_data["limits"]
     assert limits["input_tokens_max"] == 30000, f"Incorrect input limit: {limits['input_tokens_max']}"
-    assert limits["output_tokens_max"] == 8192, f"Incorrect output limit: {limits['output_tokens_max']}"
+    assert limits["output_tokens_max"] == 65536, f"Incorrect output limit: {limits['output_tokens_max']}"
     assert limits["history_window"] == 8, f"Incorrect history limit: {limits['history_window']}"
     print(f"   Active Provider: {model['provider']}")
     print(f"   Active Model: {model['model_name']}")
     print(f"   Input Token Limit: {limits['input_tokens_max']:,} tokens (~120k chars)")
-    print(f"   Output Token Limit: {limits['output_tokens_max']:,} tokens (~32k chars)")
+    print(f"   Output Token Limit: {limits['output_tokens_max']:,} tokens (~250k chars)")
     print(f"   History Window: {limits['history_window']} messages")
     print("   ✅ Token limits and model routing verified.\n")
 

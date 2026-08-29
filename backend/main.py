@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Zauq Backend API Engine",
     description="AgenticEra Decoupled Hybrid AI Engine for Zauq Discord Bot",
-    version="3.0.0",
+    version="3.2.5",
     lifespan=lifespan
 )
 
@@ -60,7 +60,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "Zauq Backend",
-        "version": "3.0.0"
+        "version": "3.2.5"
     }
 
 
