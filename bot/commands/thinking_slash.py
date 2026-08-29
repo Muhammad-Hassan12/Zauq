@@ -11,10 +11,10 @@ class ThinkingSlash(commands.Cog):
 
     @app_commands.command(
         name="thinking",
-        description="Toggle Gemini deep-thinking/reasoning mode for this channel (admin only)"
+        description="Toggle deep-thinking/reasoning mode for this channel across all AI models (admin only)"
     )
     @app_commands.describe(
-        mode="Turn Gemini extended thinking on or off for this channel",
+        mode="Turn extended deep-thinking reasoning on or off for this channel",
         scope="Apply to this channel only (default) or the entire server"
     )
     @app_commands.choices(
@@ -45,7 +45,6 @@ class ThinkingSlash(commands.Cog):
 
         try:
             async with api_client(timeout=10.0) as client:
-                # Use the dedicated thinking toggle endpoint
                 res = await client.post(
                     f"{BACKEND_URL}/api/chat/thinking",
                     json={
@@ -65,22 +64,22 @@ class ThinkingSlash(commands.Cog):
                     embed = discord.Embed(
                         title="🧠 Deep Thinking Mode Enabled",
                         description=(
-                            f"Channel <#{channel_id}> will now use **Gemini extended reasoning** "
-                            f"for all responses.\n\n"
-                            f"Zauq will think more deeply before answering — "
-                            f"expect **higher quality, more thorough** replies at the cost of slightly longer generation time.\n\n"
-                            f"> ⚡ Token budget: **16,384 thinking tokens** + up to **65,536 output tokens**"
+                            f"Channel <#{channel_id}> will now use **extended reasoning** "
+                            f"for all AI models (Gemini, DigitalOcean, Ollama, Kaggle).\n\n"
+                            f"Zauq will analyze problems step-by-step and reason deeply before answering — "
+                            f"expect **higher quality, more thorough** replies for complex tasks.\n\n"
+                            f"> ⚡ Extended token budget: **16k–65k tokens** allocated for reasoning"
                         ),
                         color=discord.Color.purple()
                     )
                     embed.set_footer(
-                        text="Only applies to Gemini models. Use /thinking mode:off to disable."
+                        text="Active for all models. Use /thinking mode:off to disable."
                     )
                 else:
                     embed = discord.Embed(
                         title="⚡ Thinking Mode Disabled",
                         description=(
-                            f"Channel <#{channel_id}> is back to **standard Gemini output mode**.\n\n"
+                            f"Channel <#{channel_id}> is back to **standard output mode**.\n\n"
                             f"Responses will be faster. Deep reasoning is off."
                         ),
                         color=discord.Color.greyple()

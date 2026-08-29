@@ -1,6 +1,10 @@
 import httpx
 import json
-from typing import List, Dict, Any, AsyncGenerator
+import logging
+from typing import List, Dict, Any, AsyncGenerator, Optional
+from backend.models.gemini_client import sanitize_response_output
+
+logger = logging.getLogger("zauq.openai_client")
 
 class OpenAICompatibleClient:
     def __init__(self, base_url: str, api_key: str = "", default_model: str = "llama3.3-70b-instruct"):
@@ -14,56 +18,94 @@ class OpenAICompatibleClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    async def generate(self, messages: List[Dict[str, str]], system_prompt: str = None, temperature: float = 0.7, model_name: str = None) -> str:
+    async def generate(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        model_name: Optional[str] = None,
+        thinking_enabled: bool = False
+    ) -> str:
         url = f"{self.base_url}/chat/completions"
         model = model_name or self.default_model
 
+        effective_system_prompt = system_prompt or ""
+        if thinking_enabled:
+            thinking_directive = (
+                "\n\n[Reasoning Directive]: Engage in deep, multi-phase systematic reasoning, "
+                "thoroughly analyzing edge cases, performance trade-offs, and structural constraints "
+                "before formulating your final polished response."
+            )
+            effective_system_prompt = (effective_system_prompt + thinking_directive).strip()
+
         formatted_messages = []
-        if system_prompt:
-            formatted_messages.append({"role": "system", "content": system_prompt})
+        if effective_system_prompt:
+            formatted_messages.append({"role": "system", "content": effective_system_prompt})
         formatted_messages.extend(messages)
+
+        # Allow generous output tokens for large code/notebook generation
+        max_output = 32768 if thinking_enabled else 16384
 
         payload = {
             "model": model,
             "messages": formatted_messages,
             "temperature": temperature,
-            "max_tokens": 8192,
+            "max_tokens": max_output,
             "stream": False
         }
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(75.0, connect=15.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=20.0)) as client:
             response = await client.post(url, json=payload, headers=self._headers())
             if response.status_code != 200:
-                raise RuntimeError(f"OpenAI-Compatible API Error ({response.status_code}) from {self.base_url}: {response.text}")
+                raise RuntimeError(f"OpenAI-Compatible API Error ({response.status_code}) from {self.base_url} for model '{model}': {response.text}")
 
             data = response.json()
             try:
-                return data["choices"][0]["message"]["content"]
+                raw_text = data["choices"][0]["message"]["content"]
+                return sanitize_response_output(raw_text)
             except (KeyError, IndexError):
                 raise RuntimeError(f"Unexpected response format from {self.base_url}: {data}")
 
-    async def generate_stream(self, messages: List[Dict[str, str]], system_prompt: str = None, temperature: float = 0.7, model_name: str = None) -> AsyncGenerator[str, None]:
+    async def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        model_name: Optional[str] = None,
+        thinking_enabled: bool = False
+    ) -> AsyncGenerator[str, None]:
         url = f"{self.base_url}/chat/completions"
         model = model_name or self.default_model
 
+        effective_system_prompt = system_prompt or ""
+        if thinking_enabled:
+            thinking_directive = (
+                "\n\n[Reasoning Directive]: Engage in deep, multi-phase systematic reasoning, "
+                "thoroughly analyzing edge cases, performance trade-offs, and structural constraints "
+                "before formulating your final polished response."
+            )
+            effective_system_prompt = (effective_system_prompt + thinking_directive).strip()
+
         formatted_messages = []
-        if system_prompt:
-            formatted_messages.append({"role": "system", "content": system_prompt})
+        if effective_system_prompt:
+            formatted_messages.append({"role": "system", "content": effective_system_prompt})
         formatted_messages.extend(messages)
+
+        max_output = 32768 if thinking_enabled else 16384
 
         payload = {
             "model": model,
             "messages": formatted_messages,
             "temperature": temperature,
-            "max_tokens": 8192,
+            "max_tokens": max_output,
             "stream": True
         }
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(75.0, connect=15.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=20.0)) as client:
             async with client.stream("POST", url, json=payload, headers=self._headers()) as response:
                 if response.status_code != 200:
                     error_text = await response.aread()
-                    raise RuntimeError(f"OpenAI-Compatible Streaming Error ({response.status_code}) from {self.base_url}: {error_text.decode()}")
+                    raise RuntimeError(f"OpenAI-Compatible Streaming Error ({response.status_code}) from {self.base_url} for model '{model}': {error_text.decode()}")
 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):

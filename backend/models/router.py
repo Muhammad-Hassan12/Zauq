@@ -137,8 +137,8 @@ class ModelRouter:
             await self._handle_audio_fallback(messages, combined_media)
             await self._handle_vision_fallback(messages, combined_media)
             await self._handle_search_context(messages, enable_search)
-            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "llama3.3-70b-instruct"
-            return await self.do_client.generate(messages, system_prompt, temperature, model_name=target_model)
+            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "kimi-k3"
+            return await self.do_client.generate(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled)
         elif provider == "ollama":
             if not settings.OLLAMA_BASE_URL:
                 raise ValueError("Tier 2 (Ollama) base URL is not configured.")
@@ -147,7 +147,7 @@ class ModelRouter:
             await self._handle_search_context(messages, enable_search)
             ollama = self._get_ollama_client()
             target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "qwen3.5:4b"
-            return await ollama.generate(messages, system_prompt, temperature, model_name=target_model)
+            return await ollama.generate(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled)
         elif provider == "kaggle":
             await self._handle_audio_fallback(messages, combined_media)
             await self._handle_vision_fallback(messages, combined_media)
@@ -190,8 +190,8 @@ class ModelRouter:
             await self._handle_audio_fallback(messages, combined_media)
             await self._handle_vision_fallback(messages, combined_media)
             await self._handle_search_context(messages, enable_search)
-            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "llama3.3-70b-instruct"
-            async for chunk in self.do_client.generate_stream(messages, system_prompt, temperature, model_name=target_model):
+            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "kimi-k3"
+            async for chunk in self.do_client.generate_stream(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled):
                 yield chunk
         elif provider == "ollama":
             if not settings.OLLAMA_BASE_URL:
@@ -201,7 +201,7 @@ class ModelRouter:
             await self._handle_search_context(messages, enable_search)
             ollama = self._get_ollama_client()
             target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "qwen3.5:4b"
-            async for chunk in ollama.generate_stream(messages, system_prompt, temperature, model_name=target_model):
+            async for chunk in ollama.generate_stream(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled):
                 yield chunk
         elif provider == "kaggle":
             await self._handle_audio_fallback(messages, combined_media)
