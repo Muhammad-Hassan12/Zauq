@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from backend.config import settings
 from backend.logging_config import setup_logging
 from backend.utils.temp_manager import temp_file_manager
+from backend.memory.memory_worker import start_memory_decay_worker
 from backend.middleware.rate_limiter import RateLimitMiddleware
 from backend.middleware.auth_middleware import AuthMiddleware
 from backend.routers import (
@@ -16,14 +17,17 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: launch background cleanup worker. Shutdown: cancel it cleanly."""
+    """Startup: launch background workers. Shutdown: cancel them cleanly."""
     cleanup_task = asyncio.create_task(temp_file_manager.cleanup_loop())
+    memory_decay_task = asyncio.create_task(start_memory_decay_worker())
     yield
     cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
+    memory_decay_task.cancel()
+    for task in [cleanup_task, memory_decay_task]:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

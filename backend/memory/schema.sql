@@ -195,3 +195,62 @@ BEGIN
     LIMIT match_count;
 END;
 $$;
+
+-- ========================================================
+-- v3.1 Migrations (additive only — safe to re-run)
+-- ========================================================
+
+-- M1: Thinking mode toggle per channel
+ALTER TABLE channel_profiles
+    ADD COLUMN IF NOT EXISTS thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- M2: Enhanced user memory fields for true vector-based L2 memory
+ALTER TABLE user_memories
+    ADD COLUMN IF NOT EXISTS importance_score DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS access_count INT NOT NULL DEFAULT 0;
+
+-- M3: Vector similarity search RPC for L2 user memories
+-- Ranks by similarity * importance_score so relevant AND important memories float up
+CREATE OR REPLACE FUNCTION match_user_memories(
+    query_embedding vector(768),
+    match_user_id TEXT,
+    match_threshold float DEFAULT 0.65,
+    match_count int DEFAULT 5
+)
+RETURNS TABLE (
+    memory_id UUID,
+    user_id TEXT,
+    category TEXT,
+    fact_content TEXT,
+    similarity float,
+    importance_score DOUBLE PRECISION,
+    created_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        m.memory_id,
+        m.user_id,
+        m.category,
+        m.fact_content,
+        1 - (m.embedding <=> query_embedding) AS similarity,
+        m.importance_score,
+        m.created_at
+    FROM user_memories m
+    WHERE m.user_id = match_user_id
+      AND m.embedding IS NOT NULL
+      AND 1 - (m.embedding <=> query_embedding) > match_threshold
+    ORDER BY (1 - (m.embedding <=> query_embedding)) * m.importance_score DESC
+    LIMIT match_count;
+END;
+$$;
+
+-- M4: Performance indexes for memory decay queries
+CREATE INDEX IF NOT EXISTS idx_user_memories_importance
+    ON user_memories(importance_score ASC);
+
+CREATE INDEX IF NOT EXISTS idx_user_memories_last_accessed
+    ON user_memories(last_accessed_at ASC);

@@ -114,7 +114,8 @@ class ModelRouter:
         temperature: float = 0.7,
         media_parts: Optional[List[Dict[str, str]]] = None,
         image_parts: Optional[List[Dict[str, str]]] = None,
-        enable_search: bool = False
+        enable_search: bool = False,
+        thinking_enabled: bool = False
     ) -> str:
         provider = provider.lower()
         combined_media = (media_parts or []) + (image_parts or [])
@@ -127,7 +128,8 @@ class ModelRouter:
                 temperature=temperature,
                 model_name=target_model,
                 media_parts=combined_media,
-                enable_search=enable_search
+                enable_search=enable_search,
+                thinking_enabled=thinking_enabled
             )
         elif provider == "digitalocean":
             if not settings.DO_MODEL_ACCESS_KEY:
@@ -164,7 +166,8 @@ class ModelRouter:
         temperature: float = 0.7,
         media_parts: Optional[List[Dict[str, str]]] = None,
         image_parts: Optional[List[Dict[str, str]]] = None,
-        enable_search: bool = False
+        enable_search: bool = False,
+        thinking_enabled: bool = False
     ) -> AsyncGenerator[str, None]:
         provider = provider.lower()
         combined_media = (media_parts or []) + (image_parts or [])
@@ -177,7 +180,8 @@ class ModelRouter:
                 temperature=temperature,
                 model_name=target_model,
                 media_parts=combined_media,
-                enable_search=enable_search
+                enable_search=enable_search,
+                thinking_enabled=thinking_enabled
             ):
                 yield chunk
         elif provider == "digitalocean":

@@ -1,3 +1,4 @@
+import re
 import time
 import base64
 import asyncio
@@ -10,7 +11,7 @@ from typing import List, Dict, Optional, Any, Literal
 from backend.config import settings
 from backend.memory.db import db_helper
 from backend.models.router import model_router
-from backend.memory.episodic import extract_and_store_user_memories
+from backend.memory.episodic import extract_and_store_user_memories, get_relevant_user_memories
 from backend.parsers.file_parser import parse_attachment, extract_generated_files
 from backend.integrations.web_search import web_search_engine
 from backend.memory.metrics import log_request_metric
@@ -74,6 +75,7 @@ class ChannelProfileRequest(BaseModel):
     operating_mode: str
     temperature: Optional[float] = None
     allow_code_exec: Optional[bool] = None
+    thinking_enabled: Optional[bool] = None
 
 @router.post("/profile")
 async def update_channel_profile(req: ChannelProfileRequest):
@@ -91,12 +93,16 @@ async def update_channel_profile(req: ChannelProfileRequest):
         else:
             if not req.channel_id:
                 raise HTTPException(status_code=400, detail="channel_id is required for channel-scoped configuration.")
+            # Preserve existing thinking_enabled unless explicitly set
+            existing_profile = await db_helper.get_channel_profile(req.channel_id) or {}
+            thinking = req.thinking_enabled if req.thinking_enabled is not None else existing_profile.get("thinking_enabled", False)
             res = await db_helper.upsert_channel_profile(
                 channel_id=req.channel_id,
                 guild_id=req.guild_id or "dm",
                 operating_mode=req.operating_mode,
                 temperature=temp,
-                allow_code_exec=allow_exec
+                allow_code_exec=allow_exec,
+                thinking_enabled=thinking
             )
             return {"status": "success", "scope": "channel", "data": res}
     except Exception as e:
@@ -112,6 +118,32 @@ async def reset_channel_profile(channel_id: str):
         "cleared": success,
         "detail": "Channel mode override cleared. Channel will now inherit the community server default mode."
     }
+
+class ThinkingToggleRequest(BaseModel):
+    channel_id: str
+    guild_id: Optional[str] = None
+    thinking_enabled: bool
+
+@router.post("/thinking")
+async def toggle_thinking_mode(req: ThinkingToggleRequest):
+    """
+    Toggle Gemini thinking/reasoning mode for a specific channel.
+    Preserves all existing channel profile settings (mode, temperature, etc.).
+    """
+    try:
+        res = await db_helper.set_channel_thinking(
+            channel_id=req.channel_id,
+            guild_id=req.guild_id or "dm",
+            enabled=req.thinking_enabled
+        )
+        return {
+            "status": "success",
+            "channel_id": req.channel_id,
+            "thinking_enabled": req.thinking_enabled,
+            "data": res
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 DEV_PERSONA_SEED = (
     "You are Zauq (ذوق) operating in Dev Mode. You are a senior software engineer and architect, "
@@ -134,7 +166,10 @@ HANGOUT_PERSONA_SEED = (
     "When the user asks to generate or export a file, wrap it inside: <zauq_file filename=\"name.ext\">...content...</zauq_file>."
 )
 
-async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, str, bool]:
+async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, str, bool, bool]:
+    """
+    Returns: (persona, mode, temp, provider, model_name, enable_search, thinking_enabled)
+    """
     # 1. Fetch channel profile / guild config
     channel_profile = await db_helper.get_channel_profile(req.channel_id)
     guild_config = await db_helper.get_guild_config(req.guild_id) if req.guild_id else None
@@ -160,11 +195,32 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
     else:
         temp = 0.2 if mode == "dev" else 0.75
 
-    # 2. Inject User Memories (L2 Memory)
+    # Thinking mode (channel-level flag, only applies to Gemini)
+    thinking_enabled = bool(channel_profile.get("thinking_enabled", False)) if channel_profile else False
+
+    # 2. Inject User Memories (L2 Semantic Memory — vector-based retrieval)
     if req.user_id:
-        memories = await db_helper.get_user_memories(req.user_id, limit=5)
+        last_user_query = req.messages[-1].get("content", "") if req.messages else ""
+        if last_user_query:
+            # Semantic retrieval: find memories relevant to this specific query
+            memories = await get_relevant_user_memories(
+                user_id=req.user_id,
+                query_text=last_user_query,
+                limit=6
+            )
+        else:
+            # No query context, fall back to recency
+            memories = await db_helper.get_user_memories(req.user_id, limit=5)
+
         if memories:
-            memory_text = "\n".join([f"- {m['fact_content']}" for m in memories])
+            memory_lines = []
+            for m in memories:
+                category = m.get("category", "general").upper()
+                # Strip contradiction prefix for display
+                if category.startswith("CONTRADICTION:"):
+                    category = f"⚠️ UPDATED {category[14:]}"
+                memory_lines.append(f"- [{category}]: {m['fact_content']}")
+            memory_text = "\n".join(memory_lines)
             persona += f"\n\n[Known User Facts for @{req.user_name or req.user_id}]:\n{memory_text}"
 
     # 3. Inject RAG Server Lore (L3 Memory)
@@ -175,7 +231,7 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
         if lore_prompt:
             persona += lore_prompt
 
-    # 4. Determine Model Selection: Channel Override -> Community Default -> System Fallback (Gemini 2.5 Flash)
+    # 4. Determine Model Selection: Channel Override -> Community Default -> System Fallback
     model_sel = await db_helper.get_model_selection(req.channel_id)
     if model_sel and model_sel.get("provider"):
         provider = model_sel.get("provider", "gemini")
@@ -201,12 +257,17 @@ async def _build_chat_context(req: ChatRequest) -> tuple[str, str, float, str, s
         "reasoning steps, or scratchpad bullet points. Output ONLY your final spoken reply."
     )
 
-    return persona, mode, temp, provider, model_name, enable_search
+    return persona, mode, temp, provider, model_name, enable_search, thinking_enabled
 
 @router.post("")
 async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
     start_time = time.time()
-    persona, mode, temp, provider, model_name, enable_search = await _build_chat_context(req)
+    persona, mode, temp, provider, model_name, enable_search, thinking_enabled = await _build_chat_context(req)
+
+    # Track original provider/model before any potential fallback
+    original_provider = provider
+    original_model = model_name
+    was_fallback = False
 
     # Process attached files / images / audio voice notes
     media_parts = []
@@ -223,7 +284,7 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
                         attached_text_blocks.append(f"\n\n[Attached Document: {att.filename}]\n{parsed['content']}")
                 except Exception as parse_err:
                     logger.warning(f"Failed to parse attachment {att.filename}: {parse_err}")
-        
+
         if attached_text_blocks:
             target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
             target_user_msg["content"] += "".join(attached_text_blocks)
@@ -244,14 +305,14 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
     if req.messages and (req.deep_search or req.enable_web_search or (req.search_category and req.search_category != "all")):
         target_user_msg = next((m for m in reversed(req.messages) if m.get("role") == "user"), req.messages[-1])
         user_text = target_user_msg.get("content", "")
-        
+
         # Extract the pure search query
         raw_search_q = req.search_query or user_text
         if 'following query: "' in raw_search_q:
             match = re.search(r'following query:\s*"([^"]+)"', raw_search_q)
             if match:
                 raw_search_q = match.group(1)
-        elif 'following query: \'' in raw_search_q:
+        elif "following query: '" in raw_search_q:
             match = re.search(r"following query:\s*'([^']+)'", raw_search_q)
             if match:
                 raw_search_q = match.group(1)
@@ -278,7 +339,8 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
                 system_prompt=persona,
                 temperature=temp,
                 media_parts=media_parts,
-                enable_search=enable_search
+                enable_search=enable_search,
+                thinking_enabled=thinking_enabled
             )
         except Exception as prov_err:
             # If a secondary provider fails (e.g. mismatched model name, offline Ollama/Kaggle),
@@ -287,6 +349,7 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
                 logger.warning(f"Provider '{provider}' with model '{model_name}' failed ({prov_err}). Gracefully falling back to Gemini 2.5 Flash.")
                 provider = "gemini"
                 model_name = "gemini-2.5-flash"
+                was_fallback = True
                 raw_response_text = await model_router.generate(
                     messages=req.messages,
                     provider="gemini",
@@ -294,7 +357,8 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
                     system_prompt=persona,
                     temperature=temp,
                     media_parts=media_parts,
-                    enable_search=enable_search
+                    enable_search=enable_search,
+                    thinking_enabled=thinking_enabled
                 )
             else:
                 raise prov_err
@@ -321,7 +385,12 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
             "provider": provider,
             "model": model_name,
             "response": clean_response_text,
-            "files": extracted_files
+            "files": extracted_files,
+            "thinking_enabled": thinking_enabled,
+            # Fallback transparency fields
+            "fallback_triggered": was_fallback,
+            "original_provider": original_provider if was_fallback else None,
+            "original_model": original_model if was_fallback else None
         }
     except Exception as e:
         logger.error(f"Chat completion error: {e}")
@@ -330,7 +399,7 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
 @router.post("/stream")
 async def chat_completion_stream(req: ChatRequest):
     start_time = time.time()
-    persona, mode, temp, provider, model_name, enable_search = await _build_chat_context(req)
+    persona, mode, temp, provider, model_name, enable_search, thinking_enabled = await _build_chat_context(req)
 
     media_parts = []
     if req.attachments:
@@ -354,11 +423,12 @@ async def chat_completion_stream(req: ChatRequest):
                 system_prompt=persona,
                 temperature=temp,
                 media_parts=media_parts,
-                enable_search=enable_search
+                enable_search=enable_search,
+                thinking_enabled=thinking_enabled
             ):
                 collected_chunks.append(chunk)
                 yield chunk
-            
+
             duration_ms = int((time.time() - start_time) * 1000)
             asyncio.create_task(
                 log_request_metric(req.guild_id, req.channel_id, req.user_id, 1, provider, model_name, duration_ms)

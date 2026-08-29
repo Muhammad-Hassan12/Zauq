@@ -1,14 +1,14 @@
-# 🤖 Zauq — Complete Master Guide & Documentation (v3.1 — Deep Web Intelligence & Hardened)
+# 🤖 Zauq — Complete Master Guide & Documentation (v3.2.5 — Semantic Memory, Thinking Mode & Fallback Alerts)
 
-**Zauq (ذوق)** is an AgenticEra Hybrid AI Discord Bot built on a high-performance **FastAPI backend engine** and a **`discord.py` thin-client frontend**. It features an explicit 3-Tier model selection router, Deep Web Roaming intelligence, a 3-Layer vector memory architecture (pgvector), isolated Docker code execution, free neural TTS voice synthesis, AI image generation, AI content moderation, an XP/reputation system, and interactive mini-games.
+**Zauq (ذوق)** is an AgenticEra Hybrid AI Discord Bot built on a high-performance **FastAPI backend engine** and a **`discord.py` thin-client frontend**. It features an explicit 3-Tier model selection router, Deep Web Roaming intelligence, a fully vector-based 3-Layer memory architecture (pgvector), Gemini extended thinking mode, isolated Docker code execution, free neural TTS voice synthesis, AI image generation, AI content moderation, an XP/reputation system, transparent provider fallback notifications, and interactive mini-games.
 
 ---
 
 ## 📐 1. Architecture Overview
 
 Zauq is split into two isolated processes running under PM2:
-1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8***`. Handles AI prompt routing, vector embeddings, memory extraction, code execution sandboxing, web search grounding, media rendering, XP tracking, reminders, and content moderation.
-2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, voice notes, and 25 slash commands, sending requests to the FastAPI backend.
+1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8***` (configurable via `BACKEND_PORT` in `.env`). Handles AI prompt routing, vector embeddings, true semantic memory extraction/retrieval, thinking mode, code execution sandboxing, web search grounding, media rendering, XP tracking, reminders, and content moderation.
+2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, voice notes, and 26 slash commands, sending requests to the FastAPI backend.
 
 ```
                   ┌─────────────────────────────────────────┐
@@ -18,7 +18,7 @@ Zauq is split into two isolated processes running under PM2:
                                        │
                          ┌─────────────▼─────────────┐
                          │   Zauq Bot (discord.py)   │
-                         │   25 Slash Commands + XP  │
+                         │   26 Slash Commands + XP  │
                          └─────────────┬─────────────┘
                                        │ HTTP (Port 8***)
                          ┌─────────────▼─────────────┐
@@ -29,8 +29,9 @@ Zauq is split into two isolated processes running under PM2:
                                 │              │
               ┌─────────────────▼───┐      ┌───▼────────────────┐
               │  Supabase pgvector  │      │  Docker Sandbox    │
-              │  (Memories & Lore)  │      │  (Python/JS/Bash)  │
-              └─────────────────────┘      └────────────────────┘
+              │ (Semantic Memories  │      │  (Python/JS/Bash)  │
+              │   + Server Lore)    │      └────────────────────┘
+              └─────────────────────┘
 ```
 
 ---
@@ -60,7 +61,33 @@ Zauq operates in two distinct modes configured via `/mode` at either **Channel**
 
 ---
 
-## ⚡ 3. Explicit Model Tier Routing Engine & Clean Taxonomy
+## 🧠 3. Thinking Mode (`/thinking`) *(v3.2.5 New)*
+
+Zauq supports Gemini's **extended deep-thinking** capability, togglable per channel by administrators.
+
+### What is Thinking Mode?
+When enabled, Gemini internally reasons through a problem step-by-step using up to **16,384 dedicated thinking tokens** before producing its final response. The internal reasoning is **never shown** to users — only the polished final answer is delivered.
+
+This significantly improves response quality for:
+- Complex multi-step technical problems
+- Logical and mathematical reasoning
+- Code architecture decisions
+- Detailed research synthesis
+
+### Usage
+```
+/thinking mode:on   -> Enable Gemini deep reasoning for this channel
+/thinking mode:off  -> Disable thinking mode, return to fast standard output
+```
+
+> Requires **Administrator** permission or designated admin role. Only applies to Gemini models — DigitalOcean, Ollama, and Kaggle providers silently ignore this flag.
+
+### Output Tokens (v3.2.5)
+Gemini's output token limit has been raised from **8,192 → 65,536 tokens** (full Gemini 2.5 capacity), giving Zauq the ability to generate comprehensive long-form responses, full project codebases, and detailed reports without truncation.
+
+---
+
+## ⚡ 4. Explicit Model Tier Routing Engine & Clean Taxonomy
 
 Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit locking**. Whatever tier and provider is selected serves **every request** for that channel or server until changed.
 
@@ -80,9 +107,23 @@ Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit l
 /model reset                                -> Clears channel override and reverts to community server default
 ```
 
+### ⚠️ Transparent Provider Fallback Alerts *(v3.2.5 New)*
+When a configured provider (DigitalOcean, Ollama, Kaggle) becomes unreachable or returns an error, Zauq **automatically falls back to Gemini Flash** to guarantee zero user interruption. Starting from v3.2.5, users are **always informed** via an orange embed notification posted after the response:
+
+```
+⚠️ Provider Fallback Activated
+Your configured provider DIGITALOCEAN (`llama3.3-70b-instruct`) was unreachable
+or returned an error.
+
+This response was generated by Gemini 2.5 Flash as an automatic fallback to
+ensure zero interruption.
+─────────────────────────────────────────────────────
+Use /model set to reconfigure your provider, or check if it's online.
+```
+
 ---
 
-## 📄 4. Universal Document, Vision & Voice Note Ingestion (30,000 Token Capacity)
+## 📄 5. Universal Document, Vision & Voice Note Ingestion (30,000 Token Capacity)
 
 Zauq automatically parses attached files in Discord with an expanded ingestion capacity of up to **120,000 characters (~30,000 tokens / ~3,000+ lines of text)** per document:
 - **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Native Gemini audio waveform ingestion for **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automatic fallback transcriber for open models)
@@ -96,9 +137,9 @@ Zauq automatically parses attached files in Discord with an expanded ingestion c
 
 ---
 
-## 📁 5. On-Demand Dynamic File Generation & ZIP Packaging (8,192 Token Output)
+## 📁 6. On-Demand Dynamic File Generation & ZIP Packaging
 
-Zauq features an enterprise file generation engine capable of outputting up to **8,192 tokens (~32,000 characters)** per generation:
+Zauq features an enterprise file generation engine capable of outputting up to **65,536 tokens (~250,000+ characters)** per generation *(raised from 8,192 in v3.2.5)*:
 - **On-Demand Standalone Files**: Ask Zauq to generate any full code or document file (e.g. *"create a landing page in index.html"*, *"generate a FastAPI auth script in auth.py"*, *"make a database schema in schema.sql"*).
 - **Dual Presentation**: Displays an interactive syntax-highlighted code block directly in chat **and uploads the complete, standalone file as a native Discord attachment (`discord.File`)** for 1-click download.
 - **Multi-File ZIP Archives**: If you request multiple files at once (e.g. HTML + CSS + JS or Backend + Dockerfile), Zauq automatically bundles all generated files into an in-memory `project_files.zip` download archive.
@@ -106,7 +147,7 @@ Zauq features an enterprise file generation engine capable of outputting up to *
 
 ---
 
-## 🌐 6. Deep Web Roaming, Autonomous Search & URL Scraper
+## 🌐 7. Deep Web Roaming, Autonomous Search & URL Scraper
 
 Zauq features an autonomous deep web intelligence engine designed to provide comprehensive, factual, and real-time research without training cutoffs:
 
@@ -139,7 +180,7 @@ Zauq features an autonomous deep web intelligence engine designed to provide com
 
 ---
 
-## 🧠 7. Memory Architecture (How Zauq Remembers)
+## 🧠 8. Memory Architecture — True Semantic Vector Memory *(v3.2.5 Powerfix)*
 
 Zauq maintains context across 3 distinct memory layers:
 
@@ -148,10 +189,38 @@ Zauq maintains context across 3 distinct memory layers:
 - Direct in-channel replies by default with automatic thread continuity when chatting inside threads or upon explicit request.
 - Intelligent message chunking: messages over 1,900 characters are split at line breaks and code block boundaries to preserve Markdown formatting.
 
-### L2 — User Episodic Facts (`user_memories`)
-- Post-response background worker analyzes conversation transcripts using the active AI model.
-- Automatically extracts user facts (e.g. tech stack, name, preferences, project context) and embeds them as **768-dimensional vectors** using `gemini-embedding-001`.
-- Stored facts are injected into the system prompt whenever the user chats with Zauq, giving it persistent memory of each user.
+### L2 — User Episodic Semantic Memory (`user_memories`) *(Fully rewritten in v3.2.5)*
+
+Every user fact is now a true **living vector memory** — not just a stored string.
+
+#### How it works:
+
+**Storage pipeline (after every conversation):**
+1. LLM extracts notable facts with `confidence` and `importance` scores
+2. **768-dim embeddings generated** for every fact via `gemini-embedding-001` (stored, not null)
+3. **Deduplication**: cosine similarity ≥ 0.92 → skip insert, reinforce existing; 0.80–0.92 → reinforce + insert
+4. **Contradiction detection**: new facts with negation signals (*"stopped using X", "no longer prefers Y"*) halve the `importance_score` of contradicted facts and tag new facts as corrections
+5. **Importance scoring**: LLM-assigned 0–1 importance, boosted for `personal`/`technical` categories
+6. **Memory expiry**: expired memories (importance < 0.15) pruned before new facts stored
+
+**Retrieval pipeline (on every chat message):**
+1. Query embedding generated from the user's current message
+2. `match_user_memories` RPC called — results ranked by **`similarity × importance_score`** (semantically relevant AND important memories float up)
+3. Fallback to recency query if RPC unavailable or user has no embeddings yet
+4. Accessed memories get `access_count++` and refreshed `last_accessed_at` (reinforcement signal)
+
+**24h Background Decay Worker:**
+- Memories not accessed in **30+ days** → importance reduced by 5% per cycle
+- Memories with importance < 0.15 → permanently pruned
+- Keeps user memory lean, current, and relevant without any manual intervention
+
+**Injected in system prompt as:**
+```
+[Known User Facts for @username]:
+- [TECHNICAL]: Uses Python and FastAPI for backend development
+- [PREFERENCE]: Prefers dark mode and minimalist UI
+- [⚠️ UPDATED TECHNICAL]: Switched from MongoDB to PostgreSQL
+```
 
 ### L3 — Server Lore RAG (`server_lore`)
 - Knowledge base containing server rules, inside jokes, documentation, or ingested GitHub READMEs.
@@ -160,7 +229,7 @@ Zauq maintains context across 3 distinct memory layers:
 
 ---
 
-## 📜 8. Complete Slash Command Reference (26 Command Groups · 34 Actions)
+## 📜 9. Complete Slash Command Reference (27 Command Groups · 36 Actions)
 
 ### 🎯 Core & Mode Commands
 
@@ -170,19 +239,25 @@ Zauq maintains context across 3 distinct memory layers:
 | `/mode` | Switch channel or community server operating mode | `/mode mode:dev scope:Server` or `/mode mode:hangout` |
 | `/mode_reset` | Clear channel mode override and revert to community default | `/mode_reset` |
 | `/summarize` | Summarize the current thread/channel into bullet points | `/summarize length:brief` or `/summarize length:detailed` |
+| `/thinking` | Toggle Gemini extended reasoning mode for this channel *(admin only)* | `/thinking mode:on` or `/thinking mode:off` |
 
 **`/info`** — Displays a comprehensive, categorized system dashboard showing:
-- **Engine & Attribution**: Engine version (`v3.2.0`), Apache 2.0 license, and creator attribution (`Syed Muhammad Hassan / AgenticEra Systems`).
+- **Engine & Attribution**: Engine version (`v3.2.5`), Apache 2.0 license, and creator attribution (`Syed Muhammad Hassan / AgenticEra Systems`).
 - **Active Model & Tier**: Current tier number (Tier 1/2/3), provider (Google AI Studio, DigitalOcean, Ollama, Kaggle), model name, and configuration scope (`Channel-Specific Override` vs `Community Server Default`).
-- **Operating Mode & Execution**: Active mode (`Dev Mode` vs `Hangout Mode`), temperature setting, and Docker sandbox code execution status.
-- **Context & Hardware Bounds**: 30,000 token input capacity (~120k chars), 8,192 token output limit (~32k chars), 8-message working window, and Docker limits (`--network none`, `256MB RAM`, `0.5 CPU`).
-- **Intelligence Subsystems**: Web Search (Deep Roaming + Grounding), Voice TTS (19 voices, 8 languages), Image Gen, and 3-Layer pgvector memory.
+- **Operating Mode & Execution**: Active mode (`Dev Mode` vs `Hangout Mode`), temperature setting, thinking mode status, and Docker sandbox code execution status.
+- **Context & Hardware Bounds**: 30,000 token input capacity (~120k chars), 65,536 token output limit, 8-message working window, and Docker limits (`--network none`, `256MB RAM`, `0.5 CPU`).
+- **Intelligence Subsystems**: Web Search (Deep Roaming + Grounding), Voice TTS (19 voices, 8 languages), Image Gen, Thinking Mode, and 3-Layer pgvector memory.
 
 **`/mode`** — Switches operating mode between Dev Mode (technical, low temp) and Hangout Mode (casual, high temp). Supports `scope: Channel` (affects current channel only) or `scope: Server` (sets permanent community default for all unconfigured channels). Requires administrator or authorized role.
 
 **`/mode_reset`** — Clears a channel's mode override so it inherits the community server default mode.
 
 **`/summarize`** — Fetches the last 50 messages from the current channel or thread and sends them to the active AI model with a summarization prompt. Returns a clean bullet-point summary embed. Supports `brief` (3-5 bullet points) and `detailed` (comprehensive) modes.
+
+**`/thinking`** *(v3.2.5 New)* — Toggles Gemini's extended deep-reasoning mode for the current channel:
+- **`mode:on`** → Enables 16,384-token thinking budget. Gemini reasons internally before responding. Ideal for complex technical questions, architecture decisions, and research tasks.
+- **`mode:off`** → Disables thinking mode. Faster standard output.
+- Only applies to Gemini models. Requires admin or authorized role.
 
 ---
 
@@ -205,9 +280,7 @@ Zauq maintains context across 3 distinct memory layers:
   - `📖 Wikipedia (Encyclopedia)`
   - `📰 News & Tech (Recent Updates)`
 
-**`/file generate`** / **`/create_file`** — Generates complete, un-truncated standalone files up to 8,192 tokens. Displays an interactive code preview in Discord and attaches the standalone `.py`, `.html`, `.json`, `.sql`, `.md`, or `.css` file as a native downloadable attachment.
-
----
+**`/file generate`** / **`/create_file`** — Generates complete, un-truncated standalone files up to **65,536 tokens** *(raised from 8,192 in v3.2.5)*. Displays an interactive code preview in Discord and attaches the standalone `.py`, `.html`, `.json`, `.sql`, `.md`, or `.css` file as a native downloadable attachment.
 
 ---
 
@@ -224,6 +297,8 @@ Zauq maintains context across 3 distinct memory layers:
 **`/model set`** — Locks the channel or entire server to a specific model tier and provider. Supports `scope: Channel` vs `scope: Server`. Requires administrator or authorized role.
 
 **`/model reset`** — Clears a channel's model override so it inherits the community server default model.
+
+> **Note**: If your configured provider is unavailable, Zauq automatically falls back to Gemini Flash and sends an **⚠️ orange fallback notification embed** so you always know when and why a fallback occurred.
 
 ---
 
@@ -269,7 +344,7 @@ Zauq maintains context across 3 distinct memory layers:
 
 **`/remember`** — Stores a piece of server knowledge (rules, inside jokes, documentation, or facts) into the Supabase `server_lore` table with a 768-dim vector embedding. This lore is automatically retrieved via RAG during future conversations. Types: `rule`, `inside_joke`, `doc`, `repo`.
 
-**`/forget`** — Permanently deletes all stored episodic user facts (L2 memory) associated with your Discord User ID from Supabase. This is irreversible and GDPR-compliant.
+**`/forget`** — Permanently deletes all stored episodic user facts (L2 memory) associated with your Discord User ID from Supabase. This is irreversible and GDPR-compliant. Also clears any computed embeddings and importance scores.
 
 **`/privacy`** — Displays Zauq's data privacy policy, explaining what data is stored, how it's used, and the zero model-training guarantee.
 
@@ -420,15 +495,15 @@ The default model is **Gemini Flash Image** which uses Google's `gemini-3.1-flas
 
 **`/admin set_role`** — Designates an upper Discord role (e.g. `@AI-Admin` or `@Moderator`) allowing members with this role to configure Zauq's model tiers, operating modes, and server settings without needing full Discord Administrator permissions. Leave `role` blank to clear. Requires **Administrator** permission.
 
-**`/admin memory`** — Shows detailed memory statistics including: total user memories stored, total server lore entries, total API requests processed, and average response latency. Data sourced from Supabase. Requires **Administrator** permission.
+**`/admin memory`** — Shows detailed memory statistics including: total user memories stored (with embeddings), total server lore entries, total API requests processed, and average response latency. Data sourced from Supabase. Requires **Administrator** permission.
 
-**`/admin channels`** — Lists all channels in the server that have been configured with AI profiles (via `/mode` or `/model set`). Shows each channel's operating mode and temperature setting. Useful for auditing which channels Zauq is active in. Requires **Administrator** permission.
+**`/admin channels`** — Lists all channels in the server that have been configured with AI profiles (via `/mode`, `/model set`, or `/thinking`). Shows each channel's operating mode, temperature, and thinking mode status. Requires **Administrator** permission.
 
 **`/stats`** — View server-level analytics: total request volume, average response latency, and provider breakdown (Gemini vs DO vs Ollama usage). Available to all users.
 
 ---
 
-## 🏆 9. XP & Reputation System
+## 🏆 10. XP & Reputation System
 
 Zauq tracks user engagement through an XP and leveling system:
 
@@ -458,7 +533,7 @@ Zauq tracks user engagement through an XP and leveling system:
 
 ---
 
-## 🛡️ 10. AI Content Moderation
+## 🛡️ 11. AI Content Moderation
 
 When enabled, Zauq uses AI to automatically moderate incoming messages:
 
@@ -482,7 +557,7 @@ All moderation actions are logged to the `moderation_log` Supabase table with: g
 
 ---
 
-## 🔌 11. Plugin System
+## 🔌 12. Plugin System
 
 Zauq supports community-made extensions through the plugin system:
 
@@ -516,7 +591,7 @@ async def setup(bot: commands.Bot):
 
 ---
 
-## 🔒 12. Security, Rate Limits & Privacy
+## 🔒 13. Security, Rate Limits & Privacy
 
 ### Rate Limiting Middleware
 - Per-Guild Limit: Max **30 requests / minute**
@@ -543,7 +618,7 @@ async def setup(bot: commands.Bot):
 
 ---
 
-## 🔧 13. Process Management (PM2 Commands)
+## 🔧 14. Process Management (PM2 Commands)
 
 To manage Zauq on your VPS:
 
@@ -572,26 +647,59 @@ tail -f /root/Zauq/logs/zauq.log
 All Zauq components use Python's `logging` module with a centralized configuration:
 - **Format**: `[timestamp] [LEVEL] [module_name] message`
 - **Output**: Console + rotating file (`logs/zauq.log`)
-- **Modules**: `zauq.bot`, `zauq.chat`, `zauq.media`, `zauq.rag`, `zauq.episodic`, `zauq.metrics`, `zauq.embeddings`, `zauq.trivia`, `zauq.plugins`, `zauq.admin`, `zauq.reminders`
+- **Modules**: `zauq.bot`, `zauq.chat`, `zauq.media`, `zauq.rag`, `zauq.episodic`, `zauq.memory_worker`, `zauq.metrics`, `zauq.embeddings`, `zauq.trivia`, `zauq.plugins`, `zauq.admin`, `zauq.reminders`
 
 ---
 
-## 🗄️ 14. Database Tables
+## 🗄️ 15. Database Tables
 
 Zauq uses the following Supabase tables:
 
-| Table | Purpose |
-|---|---|
-| `channel_profiles` | Per-channel mode, temperature, and persona settings |
-| `model_selections` | Per-channel model tier, provider, and model name |
-| `guild_configs` | Per-guild default mode, moderation settings |
-| `user_memories` | L2 episodic user facts with vector embeddings |
-| `server_lore` | L3 server knowledge base with vector embeddings |
-| `request_logs` | API request metrics (latency, model, provider) |
-| `user_stats` | XP, level, messages, commands, trivia stats per user |
-| `scheduled_reminders` | Pending and delivered reminder messages |
-| `moderation_log` | AI moderation actions (flagged, warned, deleted) |
+| Table | Purpose | v3.2.5 Changes |
+|---|---|---|
+| `channel_profiles` | Per-channel mode, temperature, and persona settings | Added `thinking_enabled BOOLEAN` |
+| `model_selections` | Per-channel model tier, provider, and model name | — |
+| `guild_configs` | Per-guild default mode, moderation settings | — |
+| `user_memories` | L2 episodic user facts with true vector embeddings | Added `importance_score`, `last_accessed_at`, `access_count` |
+| `server_lore` | L3 server knowledge base with vector embeddings | — |
+| `request_logs` | API request metrics (latency, model, provider) | — |
+| `user_stats` | XP, level, messages, commands, trivia stats per user | — |
+| `scheduled_reminders` | Pending and delivered reminder messages | — |
+| `moderation_log` | AI moderation actions (flagged, warned, deleted) | — |
+
+### v3.2.5 Supabase Migrations
+Run these in your Supabase SQL Editor if upgrading from a previous version:
+```sql
+-- M1: Thinking mode flag
+ALTER TABLE channel_profiles ADD COLUMN IF NOT EXISTS thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- M2: Enhanced memory fields
+ALTER TABLE user_memories
+  ADD COLUMN IF NOT EXISTS importance_score DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+  ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ADD COLUMN IF NOT EXISTS access_count INT NOT NULL DEFAULT 0;
+
+-- M3: Vector similarity RPC for user memories (run as-is)
+CREATE OR REPLACE FUNCTION match_user_memories(
+    query_embedding vector(768), match_user_id TEXT,
+    match_threshold float DEFAULT 0.65, match_count int DEFAULT 5
+) RETURNS TABLE (memory_id UUID, user_id TEXT, category TEXT, fact_content TEXT,
+    similarity float, importance_score DOUBLE PRECISION, created_at TIMESTAMPTZ)
+LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY SELECT m.memory_id, m.user_id, m.category, m.fact_content,
+        1 - (m.embedding <=> query_embedding) AS similarity, m.importance_score, m.created_at
+    FROM user_memories m
+    WHERE m.user_id = match_user_id AND m.embedding IS NOT NULL
+      AND 1 - (m.embedding <=> query_embedding) > match_threshold
+    ORDER BY (1 - (m.embedding <=> query_embedding)) * m.importance_score DESC LIMIT match_count;
+END; $$;
+
+-- M4: Indexes for decay worker performance
+CREATE INDEX IF NOT EXISTS idx_user_memories_importance ON user_memories(importance_score ASC);
+CREATE INDEX IF NOT EXISTS idx_user_memories_last_accessed ON user_memories(last_accessed_at ASC);
+```
 
 ---
 
-*Created for Syed Muhammad Hassan / AgenticEra Systems — Zauq v3.0 Master Documentation*
+*Created for Syed Muhammad Hassan / AgenticEra Systems — Zauq v3.2.5 Master Documentation*
