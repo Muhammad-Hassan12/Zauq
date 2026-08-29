@@ -155,7 +155,7 @@ class GeminiClient:
             thinking_enabled=thinking_enabled
         )
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=600.0) as client:
             response = await client.post(url, json=payload)
             if response.status_code != 200:
                 # If Google Search Grounding fails on specific unsupported model, retry without search tool
@@ -209,7 +209,7 @@ class GeminiClient:
             thinking_enabled=thinking_enabled
         )
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=600.0) as client:
             async with client.stream("POST", url, json=payload) as response:
                 if response.status_code != 200:
                     error_text = await response.aread()

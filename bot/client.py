@@ -437,9 +437,38 @@ async def on_message(message: discord.Message):
         "attachments": attachments_payload
     }
 
+    stop_heartbeat = asyncio.Event()
+
+    async def _progress_heartbeat(target_msg, stop_ev: asyncio.Event):
+        elapsed = 0
+        while not stop_ev.is_set():
+            try:
+                await asyncio.sleep(15)
+                if stop_ev.is_set():
+                    break
+                elapsed += 15
+                if elapsed < 30:
+                    status_text = f"⚡ *Analyzing input & planning architecture... ({elapsed}s)*"
+                elif elapsed < 90:
+                    status_text = f"🧠 *Generating full code / notebook cells... ({elapsed}s)*"
+                elif elapsed < 180:
+                    status_text = f"📦 *Structuring training loops, models & Grad-CAM... ({elapsed}s)*"
+                else:
+                    status_text = f"📦 *Finalizing code and packaging files... ({elapsed}s)*"
+                await target_msg.edit(content=status_text)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    heartbeat_task = asyncio.create_task(_progress_heartbeat(initial_msg, stop_heartbeat))
+
     try:
-        async with api_client(timeout=240.0) as client:
+        async with api_client(timeout=600.0) as client:
             res = await client.post(f"{BACKEND_URL}/api/chat", json=chat_payload)
+            stop_heartbeat.set()
+            heartbeat_task.cancel()
+
             if res.status_code != 200:
                 await initial_msg.edit(content=f"❌ Backend Error ({res.status_code}): {res.text}")
                 return
@@ -521,21 +550,28 @@ async def on_message(message: discord.Message):
                     logger.warning(f"Could not send fallback notification embed: {fb_err}")
 
     except httpx.TimeoutException:
-        logger.error("Request to backend engine timed out after 240s.")
+        stop_heartbeat.set()
+        heartbeat_task.cancel()
+        logger.error("Request to backend engine timed out after 600s.")
         try:
             await initial_msg.edit(
-                content="⏳ **Generation Timed Out**: The active AI model took too long to complete this complex request. "
-                        "Please try again, or switch to Gemini Flash via `/model set provider:gemini model:gemini-2.5-flash` for ultra-fast generation!"
+                content="⏳ **Generation Timed Out**: The request took longer than 10 minutes to complete. "
+                        "Please try breaking the request into smaller modules or switch to Gemini Flash via `/model set provider:gemini model:gemini-2.5-flash`!"
             )
         except Exception:
             pass
     except Exception as e:
+        stop_heartbeat.set()
+        heartbeat_task.cancel()
         err_msg = str(e) if str(e).strip() else (repr(e) or type(e).__name__)
         logger.error(f"Error communicating with Zauq engine: {e}", exc_info=True)
         try:
             await initial_msg.edit(content=f"❌ Error communicating with Zauq engine: {err_msg}")
         except Exception:
             pass
+    finally:
+        stop_heartbeat.set()
+        heartbeat_task.cancel()
 
 if __name__ == "__main__":
     token = settings.DISCORD_BOT_TOKEN

@@ -54,7 +54,7 @@ class OpenAICompatibleClient:
             "stream": False
         }
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=20.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
             response = await client.post(url, json=payload, headers=self._headers())
             if response.status_code != 200:
                 raise RuntimeError(f"OpenAI-Compatible API Error ({response.status_code}) from {self.base_url} for model '{model}': {response.text}")
@@ -101,7 +101,7 @@ class OpenAICompatibleClient:
             "stream": True
         }
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=20.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
             async with client.stream("POST", url, json=payload, headers=self._headers()) as response:
                 if response.status_code != 200:
                     error_text = await response.aread()

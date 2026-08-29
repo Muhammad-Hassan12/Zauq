@@ -140,12 +140,14 @@ Zauq automatically parses attached files in Discord with an expanded ingestion c
 ---
 
 ## 📁 6. On-Demand Dynamic File Generation & ZIP Packaging
-
+ 
 Zauq features an enterprise file generation engine capable of outputting up to **65,536 tokens (~250,000+ characters)** per generation *(raised from 8,192 in v3.2.5)*:
-- **On-Demand Standalone Files**: Ask Zauq to generate any full code or document file (e.g. *"create a landing page in index.html"*, *"generate a FastAPI auth script in auth.py"*, *"make a database schema in schema.sql"*).
+- **On-Demand Standalone Files**: Ask Zauq to generate any full code or document file (e.g. *"convert this notebook to CTransPath in train.ipynb"*, *"generate a FastAPI auth script in auth.py"*, *"make a database schema in schema.sql"*).
+- **Extended 10-Minute Execution Budget (600s)**: High-compute requests (such as massive PyTorch/Kaggle `.ipynb` notebooks, complex model conversions, or multi-module codebases) have up to a **10-minute generation window** so complex synthesis never cuts off.
+- **Live Progress Heartbeat**: During long generations, Zauq dynamically updates its Discord status embed every 15 seconds (`⚡ Planning architecture...` $\to$ `🧠 Generating full notebook cells...` $\to$ `📦 Structuring training loops & Grad-CAM...` $\to$ `📦 Packaging files...`) so you always have real-time visibility.
 - **Dual Presentation**: Displays an interactive syntax-highlighted code block directly in chat **and uploads the complete, standalone file as a native Discord attachment (`discord.File`)** for 1-click download.
 - **Multi-File ZIP Archives**: If you request multiple files at once (e.g. HTML + CSS + JS or Backend + Dockerfile), Zauq automatically bundles all generated files into an in-memory `project_files.zip` download archive.
-- **Commands**: `/file generate filename:app.py prompt:...` or `/create_file filename:schema.sql prompt:...`.
+- **Commands**: `/file generate filename:app.py prompt:...` or `/create_file filename:schema.sql prompt:...` or direct natural language request in chat.
 
 ---
 
