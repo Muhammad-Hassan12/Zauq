@@ -134,7 +134,7 @@ Upload any document, code file, image, or voice note directly to Discord! Zauq's
 ### 📁 7. On-Demand Dynamic File Generation & Project ZIP Bundles
 * **On-Demand File Delivery**: Generates complete, un-truncated `.ipynb`, `.py`, `.html`, `.json`, `.sql`, `.md`, `.sh`, `.css` files on user demand (up to **65,536 output tokens**).
 * **Extended 10-Minute Generation Window**: Supports up to **600 seconds** of deep compute for generating massive multi-GPU training notebooks, full-stack application repositories, and complex datasets without timeouts.
-* **Live Discord Progress Heartbeat**: Actively updates the Discord status message every 15 seconds during long synthesis tasks (`⚡ Planning...` $\to$ `🧠 Generating code...` $\to$ `📦 Packaging files...`) for seamless real-time transparency.
+* **Live Discord Progress Heartbeat**: Actively updates the Discord status message every 15 seconds during long synthesis tasks (`💭 Thinking & analyzing context...` $\to$ `🧠 Formulating response...` $\to$ `✨ Finalizing output...`) for seamless real-time transparency.
 * **Dual Output Architecture**: Displays an interactive syntax-highlighted code preview directly in chat **and attaches the standalone file as a native Discord attachment (`discord.File`)**.
 * **Automatic Project ZIP Bundling**: When 2 or more files are created simultaneously (e.g. full frontend + backend), Zauq automatically packages them into a `project_files.zip` downloadable archive.
 

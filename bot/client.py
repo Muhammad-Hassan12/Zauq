@@ -448,13 +448,13 @@ async def on_message(message: discord.Message):
                     break
                 elapsed += 15
                 if elapsed < 30:
-                    status_text = f"⚡ *Analyzing input & planning architecture... ({elapsed}s)*"
+                    status_text = f"💭 *Thinking & analyzing context... ({elapsed}s)*"
                 elif elapsed < 90:
-                    status_text = f"🧠 *Generating full code / notebook cells... ({elapsed}s)*"
+                    status_text = f"🧠 *Formulating comprehensive response... ({elapsed}s)*"
                 elif elapsed < 180:
-                    status_text = f"📦 *Structuring training loops, models & Grad-CAM... ({elapsed}s)*"
+                    status_text = f"✍️ *Writing & refining details... ({elapsed}s)*"
                 else:
-                    status_text = f"📦 *Finalizing code and packaging files... ({elapsed}s)*"
+                    status_text = f"✨ *Finalizing and polishing output... ({elapsed}s)*"
                 await target_msg.edit(content=status_text)
             except asyncio.CancelledError:
                 break
