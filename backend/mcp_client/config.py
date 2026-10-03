@@ -72,9 +72,15 @@ def load_mcp_config(config_path: str | Path | None = None) -> MCPConfigFile:
     # Validate per-server transport requirements
     valid_servers: list[MCPServerConfig] = []
     for s in config.servers:
-        if s.transport == "streamable_http" and not s.url:
-            logger.warning(f"Server '{s.id}' skipped: transport is 'streamable_http' but no 'url' provided.")
-            continue
+        if s.transport == "streamable_http":
+            if not s.url:
+                logger.warning(f"Server '{s.id}' skipped: transport is 'streamable_http' but no 'url' provided.")
+                continue
+            from backend.security.ssrf import validate_mcp_endpoint_url
+            valid_url, err_msg = validate_mcp_endpoint_url(s.url, allow_operator_private=True)
+            if not valid_url:
+                logger.warning(f"Server '{s.id}' skipped: invalid URL '{s.url}': {err_msg}")
+                continue
         if s.transport == "stdio" and not s.command:
             logger.warning(f"Server '{s.id}' skipped: transport is 'stdio' but no 'command' provided.")
             continue

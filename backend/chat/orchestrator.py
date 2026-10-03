@@ -11,6 +11,8 @@ file extractions, metrics, and episodic memory background workers.
 from __future__ import annotations
 import re
 import time
+import uuid
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 from fastapi import BackgroundTasks
@@ -25,6 +27,7 @@ from backend.integrations.web_search import web_search_engine
 from backend.search.service import search_service
 from backend.memory.metrics import log_request_metric
 from backend.memory.episodic import extract_and_store_user_memories
+from backend.security.sanitizer import sanitize_secrets
 
 logger = logging.getLogger("zauq.chat.orchestrator")
 
@@ -47,6 +50,7 @@ class ChatOrchestrator:
     async def run(self, req: Any, background_tasks: BackgroundTasks) -> Dict[str, Any]:
         """Execute chat completion request."""
         start_time = time.time()
+        request_id = f"req_{uuid.uuid4().hex[:10]}"
         ctx: ChatContext = await self.context_builder.build(req)
 
         provider = ctx.provider
@@ -57,6 +61,15 @@ class ChatOrchestrator:
 
         tool_trace = []
         tool_steps = 0
+        search_calls = 0
+        pages_fetched = 0
+        sandbox_calls = 0
+        mcp_calls = 0
+        tool_failures = 0
+        input_tokens: Optional[int] = None
+        output_tokens: Optional[int] = None
+        agent_run_id: Optional[str] = None
+        agent_duration_ms: Optional[int] = None
 
         # ── Route Path: Bounded Agent Runtime (v4) ───────────────────────────
         if settings.AGENT_RUNTIME_ENABLED:
@@ -94,6 +107,15 @@ class ChatOrchestrator:
                 raw_response_text = run_res.final_response
                 tool_trace = run_res.tool_trace
                 tool_steps = run_res.tool_steps
+                search_calls = run_res.search_calls
+                pages_fetched = run_res.pages_fetched
+                sandbox_calls = run_res.sandbox_calls
+                mcp_calls = run_res.mcp_calls
+                tool_failures = run_res.tool_failures
+                input_tokens = run_res.input_tokens
+                output_tokens = run_res.output_tokens
+                agent_run_id = run_res.agent_run_id
+                agent_duration_ms = run_res.duration_ms
             except Exception as runtime_err:
                 # Graceful fallback to Gemini if secondary provider fails
                 if provider != "gemini" and settings.GEMINI_API_KEY:
@@ -136,6 +158,15 @@ class ChatOrchestrator:
                     raw_response_text = run_res.final_response
                     tool_trace = run_res.tool_trace
                     tool_steps = run_res.tool_steps
+                    search_calls = run_res.search_calls
+                    pages_fetched = run_res.pages_fetched
+                    sandbox_calls = run_res.sandbox_calls
+                    mcp_calls = run_res.mcp_calls
+                    tool_failures = run_res.tool_failures
+                    input_tokens = run_res.input_tokens
+                    output_tokens = run_res.output_tokens
+                    agent_run_id = run_res.agent_run_id
+                    agent_duration_ms = run_res.duration_ms
                 else:
                     raise runtime_err
 
@@ -175,6 +206,8 @@ class ChatOrchestrator:
                     fetch_top_n=5 if req.deep_search else 2,
                     category=req.search_category or "all",
                 )
+                search_calls += 1
+                pages_fetched += len(search_data.get("roamed_pages", []))
                 if search_data.get("context_text"):
                     target_user_msg["content"] += (
                         f"\n\n[Autonomous Deep Web Research Context & Live Sources]:\n"
@@ -225,17 +258,35 @@ class ChatOrchestrator:
 
         # Extract generated files from response
         clean_response_text, extracted_files = extract_generated_files(raw_response_text)
+        clean_response_text = sanitize_secrets(clean_response_text)
+        for f in extracted_files:
+            if isinstance(f, dict) and "content" in f and isinstance(f["content"], str):
+                f["content"] = sanitize_secrets(f["content"])
 
         duration_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            f"request_id={request_id} provider={provider} model={model_name} status=ok duration={duration_ms}ms"
+        )
         background_tasks.add_task(
             log_request_metric,
-            req.guild_id,
-            req.channel_id,
-            req.user_id,
-            1,
-            provider,
-            model_name,
-            duration_ms,
+            guild_id=req.guild_id,
+            channel_id=req.channel_id,
+            user_id=req.user_id,
+            tier=1,
+            provider=provider,
+            model_name=model_name,
+            response_time_ms=duration_ms,
+            tool_steps=tool_steps,
+            search_calls=search_calls,
+            pages_fetched=pages_fetched,
+            sandbox_calls=sandbox_calls,
+            mcp_calls=mcp_calls,
+            tool_failures=tool_failures,
+            agent_duration_ms=agent_duration_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            request_id=request_id,
+            agent_run_id=agent_run_id,
         )
 
         if req.user_id:
@@ -257,6 +308,7 @@ class ChatOrchestrator:
             "fallback_triggered": was_fallback,
             "original_provider": original_provider if was_fallback else None,
             "original_model": original_model if was_fallback else None,
+            "request_id": request_id,
         }
 
         # Include tool metadata when running in agent mode

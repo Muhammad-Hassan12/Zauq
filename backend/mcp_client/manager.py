@@ -39,6 +39,19 @@ class ServerConnection:
         self._reconnect_task: asyncio.Task | None = None
         self._backoff_seconds: float = 5.0
         self._max_backoff: float = 60.0
+        self.consecutive_failures: int = 0
+        self.max_consecutive_failures: int = 5
+
+
+_mcp_call_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_mcp_call_semaphore() -> asyncio.Semaphore:
+    global _mcp_call_semaphore
+    if _mcp_call_semaphore is None:
+        max_conc = getattr(settings, "MCP_MAX_CONCURRENCY", 4)
+        _mcp_call_semaphore = asyncio.Semaphore(max_conc)
+    return _mcp_call_semaphore
 
 
 class MCPManager:
@@ -167,6 +180,8 @@ class MCPManager:
 
             # Discover tools and register them
             await self._discover_and_register_tools(conn)
+            conn.consecutive_failures = 0
+            conn._backoff_seconds = 5.0
             logger.info(
                 f"Successfully connected to MCP server '{conn.config.id}' "
                 f"({conn.config.transport}) with {conn.status.tools} tool(s)."
@@ -176,7 +191,8 @@ class MCPManager:
         except Exception as e:
             conn.status.connected = False
             conn.status.error = str(e)
-            logger.warning(f"Failed to connect to MCP server '{conn.config.id}': {e}")
+            conn.consecutive_failures += 1
+            logger.warning(f"Failed to connect to MCP server '{conn.config.id}' (attempt {conn.consecutive_failures}): {e}")
             if conn.stack:
                 try:
                     await conn.stack.aclose()
@@ -185,8 +201,16 @@ class MCPManager:
                 conn.stack = None
                 conn.session = None
 
-            # Schedule reconnect if running
-            if self._running and conn.config.enabled:
+            # Circuit breaker: pause reconnect loop on repeated failures to prevent retry storms
+            if conn.consecutive_failures >= conn.max_consecutive_failures:
+                if conn._reconnect_task and not conn._reconnect_task.done():
+                    conn._reconnect_task.cancel()
+                    conn._reconnect_task = None
+                logger.warning(
+                    f"MCP server '{conn.config.id}' exceeded max consecutive failures ({conn.consecutive_failures}). "
+                    "Pausing background reconnection until explicit refresh to protect host."
+                )
+            elif self._running and conn.config.enabled:
                 self._schedule_reconnect(conn)
 
             return False
@@ -221,7 +245,13 @@ class MCPManager:
             async def _make_call_tool(tool_name: str, args: dict[str, Any]) -> Any:
                 if not conn.session or not conn.status.connected:
                     raise RuntimeError(f"MCP server '{conn.config.id}' is currently disconnected.")
-                return await conn.session.call_tool(tool_name, arguments=args)
+                sem = _get_mcp_call_semaphore()
+                timeout = float(getattr(settings, "MCP_DEFAULT_TIMEOUT_SECONDS", 20.0))
+                async with sem:
+                    return await asyncio.wait_for(
+                        conn.session.call_tool(tool_name, arguments=args),
+                        timeout=timeout,
+                    )
 
             # Adapt and register each tool
             for t in tools_raw:
@@ -266,6 +296,8 @@ class MCPManager:
         if not conn:
             return False
 
+        conn.consecutive_failures = 0
+        conn._backoff_seconds = 5.0
         if not conn.status.connected:
             return await self._connect_server(conn)
 

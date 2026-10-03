@@ -11,8 +11,24 @@ services:
       - "8002:8002"
     env_file:
       - .env
+    environment:
+      - SANDBOX_RUNNER_URL=http://sandbox-runner:8001
+    depends_on:
+      - sandbox-runner
+    networks:
+      - zauq_network
+
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: zauq-sandbox-runner
+    command: python -m uvicorn backend.sandbox.runner_service:app --host 0.0.0.0 --port 8001
+    restart: unless-stopped
+    env_file:
+      - .env
     volumes:
-      # Mount Docker socket so the backend can spin up sandbox containers
+      # Only the isolated sandbox runner gets access to the Docker socket
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - zauq_network

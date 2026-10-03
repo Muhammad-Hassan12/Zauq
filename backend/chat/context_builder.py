@@ -18,6 +18,7 @@ from backend.memory.db import db_helper
 from backend.memory.episodic import get_relevant_user_memories
 from backend.parsers.file_parser import parse_attachment
 from backend.integrations.web_search import web_search_engine
+from backend.security.prompt_guard import PROMPT_INJECTION_DIRECTIVE
 
 logger = logging.getLogger("zauq.chat.context_builder")
 
@@ -30,7 +31,8 @@ DEV_PERSONA_SEED = (
     "You can receive spoken voice notes in Urdu (اردو), English, Hindi, Arabic, or any language—understand them natively and respond accurately. "
     "When the user asks for a file, script, or complete standalone document (e.g. .py, .md, .json, .sql, .html), "
     "or when generating a complete standalone project file, wrap the file inside: <zauq_file filename=\"name.ext\">...code...</zauq_file>. "
-    "For standard brief examples, use regular markdown code blocks."
+    "For standard brief examples, use regular markdown code blocks. "
+    f"\n\n[SECURITY POLICY]: {PROMPT_INJECTION_DIRECTIVE}"
 )
 
 HANGOUT_PERSONA_SEED = (
@@ -39,7 +41,8 @@ HANGOUT_PERSONA_SEED = (
     "If asked about who made you, who developed you, or your origins, clearly and proudly state that you were created and built by Syed Muhammad Hassan (AgenticEra Systems). "
     "Match the casual energy of the community while staying helpful, funny, and friendly. "
     "You can receive spoken voice notes in Urdu (اردو), English, Hindi, Arabic, or any language—understand them natively and reply naturally in the matching language. "
-    "When the user asks to generate or export a file, wrap it inside: <zauq_file filename=\"name.ext\">...content...</zauq_file>."
+    "When the user asks to generate or export a file, wrap it inside: <zauq_file filename=\"name.ext\">...content...</zauq_file>. "
+    f"\n\n[SECURITY POLICY]: {PROMPT_INJECTION_DIRECTIVE}"
 )
 
 
@@ -188,6 +191,10 @@ class ChatContextBuilder:
             "Speak DIRECTLY to the user as Zauq. Never output internal thoughts, analysis, draft options, "
             "reasoning steps, or scratchpad bullet points. Output ONLY your final spoken reply."
         )
+
+        # 8. Prompt Injection Defense Directive (Phase 12)
+        if PROMPT_INJECTION_DIRECTIVE not in persona:
+            persona += f"\n\n[SECURITY POLICY]: {PROMPT_INJECTION_DIRECTIVE}"
 
         return ChatContext(
             persona=persona,

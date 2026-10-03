@@ -97,11 +97,12 @@ async def test_runtime_single_tool_execution(mock_spec: ToolSpec):
     assert res.tool_trace[0]["tool"] == "web.search"
     assert res.tool_trace[0]["success"] is True
     assert res.tool_trace[0]["duration_ms"] == 45
-    mock_executor.execute.assert_awaited_once_with(
-        tool_name="web.search",
-        arguments={"query": "python 3.12"},
-        allow_code_exec=False,
-    )
+    call_kwargs = mock_executor.execute.call_args[1]
+    assert call_kwargs["tool_name"] == "web.search"
+    assert call_kwargs["arguments"] == {"query": "python 3.12"}
+    assert call_kwargs["allow_code_exec"] is False
+    assert call_kwargs["tool_call_id"] == "call_123"
+    assert "agent_run_id" in call_kwargs
 
 
 @pytest.mark.asyncio

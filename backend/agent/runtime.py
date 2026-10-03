@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
@@ -23,11 +24,31 @@ from backend.agent.limits import (
     GLOBAL_MAX_TOOL_STEPS,
 )
 from backend.agent.types import AgentModelTurn, ToolCall, ToolResultMessage
+from backend.config import settings
 from backend.models.router import model_router, ModelRouter
 from backend.tools.base import ToolSpec
 from backend.tools.executor import tool_executor, ToolExecutor
+from backend.security.sanitizer import sanitize_secrets
+from backend.security.prompt_guard import PROMPT_INJECTION_DIRECTIVE, fence_tool_data
 
 logger = logging.getLogger("zauq.agent.runtime")
+
+
+def extract_turn_usage(raw_meta: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Extract (input_tokens, output_tokens) from raw provider response metadata."""
+    if not raw_meta:
+        return (None, None)
+    usage_meta = raw_meta.get("usageMetadata")
+    if usage_meta and isinstance(usage_meta, dict):
+        in_t = usage_meta.get("promptTokenCount")
+        out_t = usage_meta.get("candidatesTokenCount")
+        return (in_t, out_t)
+    usage = raw_meta.get("usage")
+    if usage and isinstance(usage, dict):
+        in_t = usage.get("prompt_tokens") or usage.get("input_tokens")
+        out_t = usage.get("completion_tokens") or usage.get("output_tokens")
+        return (in_t, out_t)
+    return (None, None)
 
 
 @dataclass
@@ -62,6 +83,15 @@ class AgentRunResult:
     model_turns: int = 0
     budget_exhausted: bool = False
     loop_detected: bool = False
+    search_calls: int = 0
+    pages_fetched: int = 0
+    sandbox_calls: int = 0
+    mcp_calls: int = 0
+    tool_failures: int = 0
+    duration_ms: int = 0
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    agent_run_id: Optional[str] = None
 
 
 class AgentRuntime:
@@ -117,6 +147,15 @@ class AgentRuntime:
         Returns:
             AgentRunResult with final response, tool trace, and step count.
         """
+        start_time = time.monotonic()
+        agent_run_id = f"run_{uuid.uuid4().hex[:8]}"
+        total_input_tokens: Optional[int] = None
+        total_output_tokens: Optional[int] = None
+
+        # Ensure prompt injection defense is present in system prompt (Phase 12)
+        if PROMPT_INJECTION_DIRECTIVE not in system_prompt:
+            system_prompt = f"{system_prompt}\n\n[SECURITY POLICY]: {PROMPT_INJECTION_DIRECTIVE}"
+
         # If no tools are available or selected, execute single direct generation turn
         if not tools:
             logger.debug("No tools provided to AgentRuntime. Executing direct model turn.")
@@ -129,11 +168,14 @@ class AgentRuntime:
                 media_parts=media_parts,
                 thinking_enabled=thinking_enabled,
             )
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
             return AgentRunResult(
-                final_response=response_text,
+                final_response=sanitize_secrets(response_text),
                 tool_trace=[],
                 tool_steps=0,
                 model_turns=1,
+                agent_run_id=agent_run_id,
+                duration_ms=elapsed_ms,
             )
 
         # 1. Initialize budget
@@ -151,7 +193,7 @@ class AgentRuntime:
 
         logger.debug(
             f"Starting AgentRuntime with provider='{provider}', model='{model_name}', "
-            f"tools={[t.name for t in tools]}, max_steps={budget.max_tool_steps}"
+            f"tools={[t.name for t in tools]}, max_steps={budget.max_tool_steps}, agent_run={agent_run_id}"
         )
 
         # 2. Main Bounded Loop
@@ -169,16 +211,33 @@ class AgentRuntime:
                 thinking_enabled=thinking_enabled,
             )
 
+            # Accumulate token metrics if provider reports usage
+            in_t, out_t = extract_turn_usage(turn.raw_metadata)
+            if in_t is not None:
+                total_input_tokens = (total_input_tokens or 0) + in_t
+            if out_t is not None:
+                total_output_tokens = (total_output_tokens or 0) + out_t
+
             # If model produced final text and no tool calls -> we are done!
             if not turn.has_tool_calls:
-                logger.debug(f"Model concluded with final answer on turn {model_turns}.")
+                elapsed_ms = int((time.monotonic() - start_time) * 1000)
+                logger.debug(f"Model concluded with final answer on turn {model_turns} (agent_run={agent_run_id}).")
                 return AgentRunResult(
-                    final_response=turn.text or "",
+                    final_response=sanitize_secrets(turn.text or ""),
                     tool_trace=tool_traces,
                     tool_steps=budget.tool_steps_used,
                     model_turns=model_turns,
                     budget_exhausted=False,
                     loop_detected=loop_detected,
+                    search_calls=budget.search_calls_used,
+                    pages_fetched=budget.pages_fetched_used,
+                    sandbox_calls=budget.sandbox_calls_used,
+                    mcp_calls=budget.mcp_calls_used,
+                    tool_failures=budget.tool_failures_used,
+                    duration_ms=elapsed_ms,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    agent_run_id=agent_run_id,
                 )
 
             # Model requested one or more tool calls
@@ -206,6 +265,7 @@ class AgentRuntime:
                 if call_sig in call_signatures_seen:
                     logger.warning(f"Loop detected: duplicate tool call '{call_sig}'. Blocking execution.")
                     loop_detected = True
+                    budget.tool_failures_used += 1
                     tool_traces.append(
                         ToolTraceItem(
                             tool=call.name,
@@ -236,6 +296,8 @@ class AgentRuntime:
                     "tool_name": call.name,
                     "arguments": call.arguments,
                     "allow_code_exec": allow_code_exec,
+                    "agent_run_id": agent_run_id,
+                    "tool_call_id": call.id,
                 }
                 if guild_id is not None:
                     exec_kwargs["guild_id"] = guild_id
@@ -248,6 +310,11 @@ class AgentRuntime:
                     budget.pages_fetched_used += 1
                 elif call.name == "code.execute":
                     budget.sandbox_calls_used += 1
+                elif call.name.startswith("mcp."):
+                    budget.mcp_calls_used += 1
+
+                if not tool_res.success:
+                    budget.tool_failures_used += 1
 
                 pending_action_id = None
                 requires_conf = bool(tool_res.metadata.get("requires_confirmation"))
@@ -279,6 +346,19 @@ class AgentRuntime:
                     obs_content = tool_res.as_text()
                 else:
                     obs_content = f"Tool '{call.name}' failed: {tool_res.error}"
+
+                # Enforce Phase 12 Security Hardening:
+                # 1. Output size capping before context injection
+                max_tool_chars = getattr(settings, "SANDBOX_MAX_OUTPUT_CHARS", 12000)
+                if len(obs_content) > max_tool_chars:
+                    obs_content = obs_content[:max_tool_chars] + f"\n... [Output truncated at {max_tool_chars:,} characters]"
+
+                # 2. Secret scrubbing from model context
+                obs_content = sanitize_secrets(obs_content)
+
+                # 3. Untrusted tool data fencing (unless confirmation prompt)
+                if not requires_conf:
+                    obs_content = fence_tool_data(call.name, obs_content)
 
                 tool_traces.append(
                     ToolTraceItem(
@@ -317,7 +397,7 @@ class AgentRuntime:
         # 3. Budget Exhausted: Run one final synthesis turn without tools
         logger.info(
             f"Agent loop reached step limit ({budget.tool_steps_used}/{budget.max_tool_steps}). "
-            "Requesting final synthesis."
+            f"Requesting final synthesis (agent_run={agent_run_id})."
         )
         model_turns += 1
         final_answer = await self.router.generate(
@@ -330,13 +410,23 @@ class AgentRuntime:
             thinking_enabled=thinking_enabled,
         )
 
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
         return AgentRunResult(
-            final_response=final_answer,
+            final_response=sanitize_secrets(final_answer),
             tool_trace=tool_traces,
             tool_steps=budget.tool_steps_used,
             model_turns=model_turns,
             budget_exhausted=True,
             loop_detected=loop_detected,
+            search_calls=budget.search_calls_used,
+            pages_fetched=budget.pages_fetched_used,
+            sandbox_calls=budget.sandbox_calls_used,
+            mcp_calls=budget.mcp_calls_used,
+            tool_failures=budget.tool_failures_used,
+            duration_ms=elapsed_ms,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            agent_run_id=agent_run_id,
         )
 
 

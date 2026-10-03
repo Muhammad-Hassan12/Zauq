@@ -230,13 +230,80 @@ async def execute_code_docker(
                 pass
 
 
+import httpx
+
+
+async def execute_code_via_runner(
+    runner_url: str,
+    code: str,
+    language: str = "python",
+    timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Delegate code execution to isolated HTTP sandbox runner."""
+    endpoint = f"{runner_url.rstrip('/')}/execute"
+    headers = {"Content-Type": "application/json"}
+    if settings.INTERNAL_API_KEY:
+        headers["X-Internal-Token"] = settings.INTERNAL_API_KEY
+
+    effective_timeout = timeout if timeout is not None else float(settings.SANDBOX_DEFAULT_TIMEOUT_SECONDS)
+    payload = {
+        "code": code,
+        "language": language,
+        "timeout": effective_timeout,
+    }
+
+    req_timeout = effective_timeout + 5.0
+    try:
+        async with httpx.AsyncClient(timeout=req_timeout) as client:
+            resp = await client.post(endpoint, json=payload, headers=headers)
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code in (401, 403):
+                return {
+                    "execution_id": f"zauq_exec_{uuid.uuid4().hex[:12]}",
+                    "success": False,
+                    "stdout": "",
+                    "stderr": "Sandbox runner authentication failed.",
+                    "exit_code": 1,
+                    "execution_time_ms": 0,
+                    "timed_out": False,
+                    "truncated": False,
+                }
+            else:
+                return {
+                    "execution_id": f"zauq_exec_{uuid.uuid4().hex[:12]}",
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"Sandbox runner error (HTTP {resp.status_code}): {resp.text}",
+                    "exit_code": 1,
+                    "execution_time_ms": 0,
+                    "timed_out": False,
+                    "truncated": False,
+                }
+    except Exception as exc:
+        logger.error(f"Failed to communicate with sandbox runner at '{runner_url}': {exc}")
+        return {
+            "execution_id": f"zauq_exec_{uuid.uuid4().hex[:12]}",
+            "success": False,
+            "stdout": "",
+            "stderr": f"Failed to communicate with sandbox runner: {exc}",
+            "exit_code": 1,
+            "execution_time_ms": 0,
+            "timed_out": False,
+            "truncated": False,
+        }
+
+
 async def execute_code(
     code: str,
     language: str = "python",
     timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Top-level entrypoint for sandbox execution."""
-    if await is_docker_available():
+    runner_url = getattr(settings, "SANDBOX_RUNNER_URL", "")
+    if runner_url:
+        return await execute_code_via_runner(runner_url, code, language, timeout)
+    elif await is_docker_available():
         return await execute_code_docker(code, language, timeout)
     else:
         return {
@@ -253,6 +320,30 @@ async def execute_code(
 
 async def get_sandbox_status() -> Dict[str, Any]:
     """Returns sandbox health, limits, and runtime configuration."""
+    runner_url = getattr(settings, "SANDBOX_RUNNER_URL", "")
+    if runner_url:
+        try:
+            endpoint = f"{runner_url.rstrip('/')}/status"
+            headers = {}
+            if settings.INTERNAL_API_KEY:
+                headers["X-Internal-Token"] = settings.INTERNAL_API_KEY
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(endpoint, headers=headers)
+                if resp.status_code == 200:
+                    status_data = resp.json()
+                    status_data["isolated_runner"] = True
+                    status_data["runner_url"] = runner_url
+                    return status_data
+        except Exception as e:
+            logger.warning(f"Could not reach sandbox runner at {runner_url}: {e}")
+            return {
+                "status": "runner_unreachable",
+                "docker_available": False,
+                "isolated_runner": True,
+                "runner_url": runner_url,
+                "error": str(e),
+            }
+
     docker_up = await is_docker_available()
     allowed_unique = sorted(list(set(img for img, _, _ in _ALLOWED_IMAGES.values())))
     return {

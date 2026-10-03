@@ -40,8 +40,16 @@ class Settings(BaseSettings):
     MCP_ENABLED: bool = False
     MCP_CONFIG_PATH: str = "config/mcp_servers.json"
     MCP_MAX_SERVERS: int = 5
+    MCP_MAX_CONCURRENCY: int = 4
+    MCP_DEFAULT_TIMEOUT_SECONDS: float = 20.0
+
+    # ── v4 Observability & VPS Protection (Phase 11) ───────────────────────────
+    WEB_FETCH_CONCURRENCY: int = 3
+    AGENT_TOTAL_TIMEOUT_SECONDS: float = 90.0
+    AGENT_DEEP_RESEARCH_TIMEOUT_SECONDS: float = 180.0
 
     # ── v4 Sandbox ────────────────────────────────────────────────────────────
+    SANDBOX_RUNNER_URL: Optional[str] = ""   # e.g. "http://sandbox-runner:8001" for isolated runner
     SANDBOX_MAX_CONCURRENCY: int = 1
     SANDBOX_DEFAULT_TIMEOUT_SECONDS: int = 8
     SANDBOX_MAX_OUTPUT_CHARS: int = 12000

@@ -29,6 +29,7 @@ class AgentBudget:
     pages_fetched_used: int = 0
     sandbox_calls_used: int = 0
     mcp_calls_used: int = 0
+    tool_failures_used: int = 0
 
     def is_exhausted(self) -> bool:
         """True when the tool step limit has been reached."""

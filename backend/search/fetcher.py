@@ -18,74 +18,12 @@ _FETCH_SEM: asyncio.Semaphore | None = None
 def _get_semaphore() -> asyncio.Semaphore:
     global _FETCH_SEM
     if _FETCH_SEM is None:
-        _FETCH_SEM = asyncio.Semaphore(3)  # max 3 parallel page fetches
+        concurrency = getattr(settings, "WEB_FETCH_CONCURRENCY", 3)
+        _FETCH_SEM = asyncio.Semaphore(concurrency)
     return _FETCH_SEM
 
 
-# ── SSRF Protection ───────────────────────────────────────────────────────────
-
-_BLOCKED_HOSTNAMES = frozenset({
-    "localhost", "127.0.0.1", "::1", "0.0.0.0", "local",
-    "metadata.google.internal", "169.254.169.254",
-})
-
-
-def is_safe_public_url(url: str) -> bool:
-    """
-    Validates that a URL:
-    - Uses http or https scheme
-    - Does not resolve to private / loopback / link-local / reserved / multicast IPs
-    - Is not a known internal metadata endpoint
-
-    This is the authoritative SSRF guard for web_fetch.
-    Also exported from backend.integrations.web_search for backward compatibility.
-    """
-    if not url:
-        return False
-    try:
-        parsed = urllib.parse.urlparse(url.strip())
-        if parsed.scheme not in ("http", "https"):
-            return False
-        hostname = parsed.hostname
-        if not hostname:
-            return False
-        if hostname.lower() in _BLOCKED_HOSTNAMES:
-            return False
-
-        # Fast-path: direct IP check without DNS overhead
-        try:
-            direct_ip = ipaddress.ip_address(hostname)
-            return not (
-                direct_ip.is_private
-                or direct_ip.is_loopback
-                or direct_ip.is_link_local
-                or direct_ip.is_reserved
-                or direct_ip.is_multicast
-                or direct_ip.is_unspecified
-            )
-        except ValueError:
-            pass
-
-        addr_info = socket.getaddrinfo(hostname, None)
-        if not addr_info:
-            return False
-
-        for _family, _type, _proto, _canon, sockaddr in addr_info:
-            ip_str = sockaddr[0]
-            ip = ipaddress.ip_address(ip_str)
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
-                return False
-        return True
-    except Exception as exc:
-        logger.debug(f"URL safety check failed for '{url}': {exc}")
-        return False
+from backend.security.ssrf import is_safe_public_url  # noqa: F401
 
 
 # ── Fetch implementation ──────────────────────────────────────────────────────
