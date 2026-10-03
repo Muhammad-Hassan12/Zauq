@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS channel_profiles (
 CREATE TABLE IF NOT EXISTS model_selection (
     channel_id TEXT PRIMARY KEY,
     tier INT NOT NULL CHECK (tier IN (1, 2, 3)),
-    provider TEXT NOT NULL CHECK (provider IN ('gemini', 'digitalocean', 'ollama', 'kaggle')),
+    provider TEXT NOT NULL CHECK (provider IN ('gemini', 'digitalocean', 'anthropic', 'qwen', 'deepseek', 'ollama', 'kaggle')),
     model_name TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by TEXT

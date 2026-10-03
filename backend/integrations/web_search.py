@@ -8,52 +8,50 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("zauq.web_search")
 
-def is_safe_public_url(url: str) -> bool:
-    """
-    Validates that a URL uses http/https and does not resolve to private,
-    loopback, link-local, multicast, or reserved IP ranges (SSRF protection).
-    """
-    if not url:
-        return False
-    try:
-        parsed = urllib.parse.urlparse(url.strip())
-        if parsed.scheme not in ("http", "https"):
+# ── v4 Compatibility: SSRF guard is now the canonical implementation in
+#    backend.search.fetcher. Re-export it here so any existing caller of
+#    `from backend.integrations.web_search import is_safe_public_url`
+#    continues to work without modification.
+try:
+    from backend.search.fetcher import is_safe_public_url  # noqa: F401
+except ImportError:
+    # Fallback: inline v3 implementation if v4 module is not yet available.
+    def is_safe_public_url(url: str) -> bool:  # type: ignore[misc]
+        """SSRF protection: validates URL is http(s) and resolves to a public IP."""
+        if not url:
             return False
-        hostname = parsed.hostname
-        if not hostname:
-            return False
-
-        # Explicitly block known localhost names
-        if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "local", "metadata.google.internal"):
-            return False
-
-        # Resolve hostname to all associated IPs and verify each
-        addr_info = socket.getaddrinfo(hostname, None)
-        if not addr_info:
-            return False
-
-        for family, _, _, _, sockaddr in addr_info:
-            ip_str = sockaddr[0]
-            ip = ipaddress.ip_address(ip_str)
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
+        try:
+            parsed = urllib.parse.urlparse(url.strip())
+            if parsed.scheme not in ("http", "https"):
                 return False
-        return True
-    except Exception as e:
-        logger.debug(f"URL safety check failed for {url}: {e}")
-        return False
+            hostname = parsed.hostname
+            if not hostname:
+                return False
+            if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "local", "metadata.google.internal"):
+                return False
+            addr_info = socket.getaddrinfo(hostname, None)
+            if not addr_info:
+                return False
+            for _family, _type, _proto, _canon, sockaddr in addr_info:
+                ip_str = sockaddr[0]
+                ip = ipaddress.ip_address(ip_str)
+                if (
+                    ip.is_private or ip.is_loopback or ip.is_link_local
+                    or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+                ):
+                    return False
+            return True
+        except Exception as exc:
+            logger.debug(f"URL safety check failed for {url}: {exc}")
+            return False
+
 
 class WebSearchEngine:
     """
     Universal Web Search and URL Content Reader for Zauq.
     Provides DuckDuckGo live search, Jina Reader URL scraping, and search query extraction.
     """
+
 
     def __init__(self):
         self.headers = {

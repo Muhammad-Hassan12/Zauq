@@ -4,10 +4,17 @@ from backend.config import settings
 from backend.models.gemini_client import GeminiClient
 from backend.models.openai_compatible_client import OpenAICompatibleClient
 from backend.models.kaggle_client import KaggleClient
+from backend.models.anthropic_client import AnthropicClient
+from backend.models.qwen_client import QwenClient
+from backend.models.deepseek_client import DeepSeekClient
+from backend.models.catalog import normalize_provider_id, get_provider
+from backend.models.capabilities import supports_audio, supports_vision, supports_native_tools
+from backend.agent.types import AgentModelTurn
 from backend.parsers.audio_transcriber import audio_transcriber
 from backend.integrations.web_search import web_search_engine
 
 logger = logging.getLogger("zauq.router")
+
 
 class ModelRouter:
     def __init__(self):
@@ -17,6 +24,9 @@ class ModelRouter:
             api_key=settings.DO_MODEL_ACCESS_KEY,
             default_model="llama3.3-70b-instruct"
         )
+        self.anthropic_client = AnthropicClient()
+        self.qwen_client = QwenClient()
+        self.deepseek_client = DeepSeekClient()
 
     def _get_ollama_client(self) -> OpenAICompatibleClient:
         base_url = settings.OLLAMA_BASE_URL or "http://localhost:11434"
@@ -51,7 +61,7 @@ class ModelRouter:
                         target_msg["content"] = f"{original_content}\n\n[Transcribed Spoken Voice Note]: {transcript}"
 
     async def _handle_vision_fallback(self, messages: List[Dict[str, Any]], media_parts: Optional[List[Dict[str, str]]]):
-        """For non-vision providers (DigitalOcean, Ollama, Kaggle), uses Gemini Flash Vision to extract full visual analysis & OCR."""
+        """For non-vision providers, uses Gemini Flash Vision to extract full visual analysis & OCR."""
         if not media_parts or not messages:
             return
 
@@ -105,6 +115,33 @@ class ModelRouter:
             )
             messages[-1]["content"] += search_block
 
+    async def _preprocess_pipeline(
+        self,
+        messages: List[Dict[str, Any]],
+        combined_media: List[Dict[str, str]],
+        provider: str,
+        target_model: str,
+        enable_search: bool,
+    ):
+        """Unified pre-processing helper: audio transcription, vision OCR fallback, search context."""
+        # 1. Audio fallback if provider/model cannot natively ingest audio
+        if not supports_audio(provider, target_model):
+            await self._handle_audio_fallback(messages, combined_media)
+
+        # 2. Vision fallback if provider/model cannot natively accept images
+        if not supports_vision(provider, target_model):
+            await self._handle_vision_fallback(messages, combined_media)
+
+        # 3. Search context injection if requested
+        await self._handle_search_context(messages, enable_search)
+
+    def _resolve_target_model(self, provider: str, model_name: Optional[str]) -> str:
+        """Resolves target model, respecting provider defaults."""
+        if model_name and model_name != "gemini-2.5-flash":
+            return model_name
+        spec = get_provider(provider)
+        return spec.default_model if spec else (model_name or "gemini-2.5-flash")
+
     async def generate(
         self,
         messages: List[Dict[str, Any]],
@@ -117,8 +154,9 @@ class ModelRouter:
         enable_search: bool = False,
         thinking_enabled: bool = False
     ) -> str:
-        provider = provider.lower()
+        provider = normalize_provider_id(provider)
         combined_media = (media_parts or []) + (image_parts or [])
+        target_model = self._resolve_target_model(provider, model_name)
 
         if provider == "gemini":
             target_model = model_name or "gemini-2.5-flash"
@@ -131,29 +169,55 @@ class ModelRouter:
                 enable_search=enable_search,
                 thinking_enabled=thinking_enabled
             )
-        elif provider == "digitalocean":
+
+        # Run unified preprocessing pipeline for non-Gemini providers
+        await self._preprocess_pipeline(messages, combined_media, provider, target_model, enable_search)
+
+        if provider == "digitalocean":
             if not settings.DO_MODEL_ACCESS_KEY:
                 raise ValueError("DigitalOcean Gradient Key (DO_MODEL_ACCESS_KEY) is not configured.")
-            await self._handle_audio_fallback(messages, combined_media)
-            await self._handle_vision_fallback(messages, combined_media)
-            await self._handle_search_context(messages, enable_search)
-            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "kimi-k3"
             return await self.do_client.generate(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled)
+
+        elif provider == "anthropic":
+            return await self.anthropic_client.generate(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            )
+
+        elif provider == "qwen":
+            return await self.qwen_client.generate(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            )
+
+        elif provider == "deepseek":
+            return await self.deepseek_client.generate(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            )
+
         elif provider == "ollama":
             if not settings.OLLAMA_BASE_URL:
                 raise ValueError("Tier 2 (Ollama) base URL is not configured.")
-            await self._handle_audio_fallback(messages, combined_media)
-            await self._handle_vision_fallback(messages, combined_media)
-            await self._handle_search_context(messages, enable_search)
             ollama = self._get_ollama_client()
-            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "qwen3.5:4b"
             return await ollama.generate(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled)
+
         elif provider == "kaggle":
-            await self._handle_audio_fallback(messages, combined_media)
-            await self._handle_vision_fallback(messages, combined_media)
-            await self._handle_search_context(messages, enable_search)
             kaggle = self._get_kaggle_client()
             return await kaggle.generate(messages, system_prompt, temperature)
+
         else:
             raise ValueError(f"Unknown model provider: '{provider}'")
 
@@ -169,8 +233,9 @@ class ModelRouter:
         enable_search: bool = False,
         thinking_enabled: bool = False
     ) -> AsyncGenerator[str, None]:
-        provider = provider.lower()
+        provider = normalize_provider_id(provider)
         combined_media = (media_parts or []) + (image_parts or [])
+        target_model = self._resolve_target_model(provider, model_name)
 
         if provider == "gemini":
             target_model = model_name or "gemini-2.5-flash"
@@ -184,33 +249,148 @@ class ModelRouter:
                 thinking_enabled=thinking_enabled
             ):
                 yield chunk
-        elif provider == "digitalocean":
+            return
+
+        # Run unified preprocessing pipeline for non-Gemini providers
+        await self._preprocess_pipeline(messages, combined_media, provider, target_model, enable_search)
+
+        if provider == "digitalocean":
             if not settings.DO_MODEL_ACCESS_KEY:
                 raise ValueError("DigitalOcean Gradient Key (DO_MODEL_ACCESS_KEY) is not configured.")
-            await self._handle_audio_fallback(messages, combined_media)
-            await self._handle_vision_fallback(messages, combined_media)
-            await self._handle_search_context(messages, enable_search)
-            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "kimi-k3"
             async for chunk in self.do_client.generate_stream(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled):
                 yield chunk
+
+        elif provider == "anthropic":
+            async for chunk in self.anthropic_client.generate_stream(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            ):
+                yield chunk
+
+        elif provider == "qwen":
+            async for chunk in self.qwen_client.generate_stream(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            ):
+                yield chunk
+
+        elif provider == "deepseek":
+            async for chunk in self.deepseek_client.generate_stream(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            ):
+                yield chunk
+
         elif provider == "ollama":
             if not settings.OLLAMA_BASE_URL:
                 raise ValueError("Tier 2 (Ollama) base URL is not configured.")
-            await self._handle_audio_fallback(messages, combined_media)
-            await self._handle_vision_fallback(messages, combined_media)
-            await self._handle_search_context(messages, enable_search)
             ollama = self._get_ollama_client()
-            target_model = model_name if (model_name and model_name != "gemini-2.5-flash") else "qwen3.5:4b"
             async for chunk in ollama.generate_stream(messages, system_prompt, temperature, model_name=target_model, thinking_enabled=thinking_enabled):
                 yield chunk
+
         elif provider == "kaggle":
-            await self._handle_audio_fallback(messages, combined_media)
-            await self._handle_vision_fallback(messages, combined_media)
-            await self._handle_search_context(messages, enable_search)
             kaggle = self._get_kaggle_client()
             async for chunk in kaggle.generate_stream(messages, system_prompt, temperature):
                 yield chunk
+
         else:
             raise ValueError(f"Unknown model provider: '{provider}'")
 
+    async def generate_agent_turn(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Any]] = None,
+        provider: str = "gemini",
+        model_name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        media_parts: Optional[List[Dict[str, str]]] = None,
+        image_parts: Optional[List[Dict[str, str]]] = None,
+        thinking_enabled: bool = False,
+    ) -> AgentModelTurn:
+        """Dispatches an agent turn with native tool-calling capabilities."""
+        provider = normalize_provider_id(provider)
+        combined_media = (media_parts or []) + (image_parts or [])
+        target_model = self._resolve_target_model(provider, model_name)
+
+        # Enforce capability check: unsupported providers cannot accidentally receive tool payloads
+        if tools and not supports_native_tools(provider, target_model):
+            raise ValueError(
+                f"Provider '{provider}' with model '{target_model}' does not support native tool calling."
+            )
+
+        if provider == "gemini":
+            target_model = model_name or "gemini-2.5-flash"
+            return await self.gemini_client.generate_agent_turn(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                image_parts=image_parts,
+                thinking_enabled=thinking_enabled,
+            )
+
+        # Run unified preprocessing pipeline for non-Gemini providers
+        await self._preprocess_pipeline(messages, combined_media, provider, target_model, enable_search=False)
+
+        if provider == "anthropic":
+            return await self.anthropic_client.generate_agent_turn(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            )
+        elif provider == "qwen":
+            return await self.qwen_client.generate_agent_turn(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            )
+        elif provider == "deepseek":
+            return await self.deepseek_client.generate_agent_turn(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                media_parts=combined_media,
+                thinking_enabled=thinking_enabled,
+            )
+        elif provider == "digitalocean":
+            if not settings.DO_MODEL_ACCESS_KEY:
+                raise ValueError("DigitalOcean Gradient Key (DO_MODEL_ACCESS_KEY) is not configured.")
+            return await self.do_client.generate_agent_turn(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                model_name=target_model,
+                thinking_enabled=thinking_enabled,
+            )
+        else:
+            raise ValueError(f"Provider '{provider}' does not support agent turn generation.")
+
+
 model_router = ModelRouter()
+

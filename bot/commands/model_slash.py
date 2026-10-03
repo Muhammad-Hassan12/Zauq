@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
+from backend.models.catalog import PROVIDERS, get_provider, get_models_for_provider, normalize_provider_id
 from bot.auth import check_admin_authorization, make_denied_embed
 from bot.api import BACKEND_URL, api_client
 
@@ -27,11 +28,12 @@ class ModelSlash(commands.Cog):
 
                 data = res.json()
                 tier = data.get("tier", 1)
-                provider = data.get("provider", "gemini").upper()
+                provider = data.get("provider", "gemini").lower()
                 model_name = data.get("model_name", "gemini-2.5-flash")
                 scope = data.get("scope", "system")
 
-                provider_display = "Google AI Studio" if provider == "GEMINI" else ("DigitalOcean Gradient" if provider == "DIGITALOCEAN" else provider)
+                spec = get_provider(provider)
+                provider_display = spec.display_name if spec else provider.upper()
 
                 embed = discord.Embed(
                     title="🤖 Current Model Configuration",
@@ -62,69 +64,50 @@ class ModelSlash(commands.Cog):
         interaction: discord.Interaction,
         current: str
     ) -> list[app_commands.Choice[str]]:
-        models = [
-            # Google AI Studio - Gemini Family
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3-pro-preview",
-            "gemini-3-flash-preview",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            # Google AI Studio - Gemma Family
-            "gemma-4-26b-a4b-it",
-            "gemma-4-31b-it",
-            # DigitalOcean Gradient Models
-            "kimi-k3",
-            "kimi-k2.6",
-            "kimi-k2.5",
-            "glm-5.3",
-            "glm-5.3-flash",
-            "glm-5.2",
-            "glm-5.1",
-            "glm-5",
-            "deepseek-v4-pro",
-            "deepseek-v4-flash-0731",
-            "deepseek-4-flash",
-            "deepseek-3.2",
-            "qwen3.8-max",
-            "qwen3.5-397b-a17b",
-            "llama-4-maverick",
-            "llama3.3-70b-instruct",
-            "minimax-m2.5",
-            "mimo-v2.5-pro",
-            "nemotron-3-ultra-550b",
-            "nemotron-3-nano-omni",
-            "nemotron-nano-12b-v2-vl",
-            "mistral-3-14B",
-            # Local & Kaggle
-            "qwen3.5:4b",
-            "qwen3.5-t4"
-        ]
-        return [
+        # Check if provider is specified in current slash command invocation
+        provider_arg = getattr(interaction.namespace, "provider", None)
+        if provider_arg:
+            models = get_models_for_provider(provider_arg)
+        else:
+            # Aggregate all unique models across providers
+            models = []
+            for p in PROVIDERS.values():
+                for m in p.models:
+                    if m not in models:
+                        models.append(m)
+
+        filtered = [
             app_commands.Choice(name=m, value=m)
             for m in models if current.lower() in m.lower()
         ][:25]
 
+        # Allow admins to enter a custom model ID
+        if current and not any(c.value == current for c in filtered) and len(filtered) < 25:
+            filtered.insert(0, app_commands.Choice(name=f"Custom: {current}", value=current))
+
+        return filtered
+
     @model_group.command(name="set", description="Set model tier and provider (per channel or permanent community default)")
     @app_commands.describe(
         tier="Choose Tier: 1 (Cloud Primary), 2 (Local Ollama), 3 (Kaggle T4)",
-        provider="Select Provider: Google AI Studio, DigitalOcean, Ollama, Kaggle",
+        provider="Select Provider: Google AI Studio, DigitalOcean, Anthropic, Qwen, DeepSeek, Ollama, Kaggle",
         scope="Set for this channel only or as the community server default",
         model_name="Optional custom model name (autocomplete available)"
     )
     @app_commands.choices(
         tier=[
-            app_commands.Choice(name="Tier 1 (Cloud Primary: Google / DigitalOcean)", value=1),
-            app_commands.Choice(name="Tier 2 (Local VPS: Ollama)", value=2),
-            app_commands.Choice(name="Tier 3 (Batch GPU: Kaggle T4)", value=3),
+            app_commands.Choice(name="Tier 1 — Cloud Primary: Google / DigitalOcean / Anthropic / Qwen / DeepSeek", value=1),
+            app_commands.Choice(name="Tier 2 — Local VPS: Ollama", value=2),
+            app_commands.Choice(name="Tier 3 — Batch GPU: Kaggle", value=3),
         ],
         provider=[
             app_commands.Choice(name="Google AI Studio (Gemini / Gemma)", value="gemini"),
             app_commands.Choice(name="DigitalOcean Gradient", value="digitalocean"),
-            app_commands.Choice(name="Local VPS (Ollama: qwen3.5:4b)", value="ollama"),
-            app_commands.Choice(name="Batch GPU (Kaggle T4 Tunnel)", value="kaggle"),
+            app_commands.Choice(name="Anthropic Claude", value="anthropic"),
+            app_commands.Choice(name="Alibaba Qwen", value="qwen"),
+            app_commands.Choice(name="DeepSeek", value="deepseek"),
+            app_commands.Choice(name="Local VPS (Ollama)", value="ollama"),
+            app_commands.Choice(name="Batch GPU (Kaggle)", value="kaggle"),
         ],
         scope=[
             app_commands.Choice(name="Channel (This channel only)", value="channel"),

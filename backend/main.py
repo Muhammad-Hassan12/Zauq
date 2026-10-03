@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from backend.config import settings
+from backend.version import ZAUQ_VERSION
 from backend.logging_config import setup_logging
 from backend.utils.temp_manager import temp_file_manager
 from backend.memory.memory_worker import start_memory_decay_worker
@@ -33,7 +34,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Zauq Backend API Engine",
     description="AgenticEra Decoupled Hybrid AI Engine for Zauq Discord Bot",
-    version="3.2.5",
+    version=ZAUQ_VERSION,
     lifespan=lifespan
 )
 
@@ -60,7 +61,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "Zauq Backend",
-        "version": "3.2.5"
+        "version": ZAUQ_VERSION
     }
 
 

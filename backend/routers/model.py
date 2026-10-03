@@ -4,6 +4,17 @@ from typing import Optional
 from backend.memory.db import db_helper
 from backend.models.router import model_router
 
+from backend.models.catalog import (
+    normalize_provider_id,
+    validate_provider_tier,
+    validate_provider_credentials,
+    get_provider,
+    list_providers,
+    get_models_for_provider,
+    VALID_TIER_PROVIDERS,
+    PROVIDERS,
+)
+
 router = APIRouter(prefix="/api/model", tags=["Model Selection"])
 
 class ModelSetRequest(BaseModel):
@@ -16,16 +27,22 @@ class ModelSetRequest(BaseModel):
     updated_by: Optional[str] = ""
 
 def normalize_provider(raw_provider: str) -> str:
-    p = raw_provider.lower().strip()
-    if p in ["google", "gemini", "google ai studio", "gemma"]:
-        return "gemini"
-    if p in ["do", "digitalocean", "gradient"]:
-        return "digitalocean"
-    if p in ["ollama", "local"]:
-        return "ollama"
-    if p in ["kaggle", "batch gpu"]:
-        return "kaggle"
-    return p
+    return normalize_provider_id(raw_provider)
+
+@router.get("/providers")
+async def get_all_providers():
+    """Returns all registered AI providers, tiers, and capabilities from the central catalog."""
+    return {"providers": [p.__dict__ for p in list_providers()]}
+
+@router.get("/catalog/{provider}")
+async def get_provider_catalog(provider: str):
+    """Returns available models for the specified provider."""
+    models = get_models_for_provider(provider)
+    if not models:
+        clean_id = normalize_provider_id(provider)
+        if clean_id not in PROVIDERS:
+            raise HTTPException(status_code=404, detail=f"Unknown provider '{provider}'.")
+    return {"provider": normalize_provider_id(provider), "models": models}
 
 @router.get("/status")
 async def get_model_status(channel_id: str, guild_id: Optional[str] = None):
@@ -97,32 +114,27 @@ async def list_gemini_models():
 async def list_do_models():
     """Returns available models from DigitalOcean Gradient Serverless Inference."""
     return {
-        "models": [
-            "kimi-k3",
-            "glm-5.1",
-            "glm-5.2",
-            "deepseek-v4-pro",
-            "deepseek-4-flash",
-            "qwen3.5-397b-a17b",
-            "llama3.3-70b-instruct"
-        ]
+        "models": get_models_for_provider("digitalocean")
     }
 
 @router.post("/set")
 async def set_model_selection(req: ModelSetRequest):
-    valid_providers = {
-        1: ["gemini", "digitalocean"],
-        2: ["ollama"],
-        3: ["kaggle"]
-    }
-    if req.tier not in valid_providers:
+    if req.tier not in VALID_TIER_PROVIDERS:
         raise HTTPException(status_code=400, detail="Invalid tier. Choose 1, 2, or 3.")
 
-    provider_clean = normalize_provider(req.provider)
-    if provider_clean not in valid_providers[req.tier]:
+    provider_clean = normalize_provider_id(req.provider)
+    if not validate_provider_tier(provider_clean, req.tier):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid provider for Tier {req.tier}. Allowed: {valid_providers[req.tier]} (Note: Google/Gemini are in Tier 1)."
+            detail=f"Invalid provider for Tier {req.tier}. Allowed: {VALID_TIER_PROVIDERS[req.tier]}"
+        )
+
+    # Validate provider credentials before saving
+    is_valid, cred_err = validate_provider_credentials(provider_clean)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Credential validation failed: {cred_err}"
         )
 
     # Health check ping for Tier 3 Kaggle tunnel
@@ -135,14 +147,10 @@ async def set_model_selection(req: ModelSetRequest):
                 detail="Tier 3 (Kaggle T4 Tunnel) is currently offline or unreachable. Please wake Kaggle tunnel first."
             )
 
-    # Default model names if not supplied
-    default_models = {
-        "gemini": "gemini-2.5-flash",
-        "digitalocean": "llama3.3-70b-instruct",
-        "ollama": "qwen3.5:4b",
-        "kaggle": "qwen3.5-t4"
-    }
-    model_name = req.model_name or default_models.get(provider_clean, "default")
+    # Default model resolution from central catalog
+    prov_spec = get_provider(provider_clean)
+    default_model = prov_spec.default_model if prov_spec else "gemini-2.5-flash"
+    model_name = req.model_name or default_model
 
     scope = (req.scope or "channel").lower()
 

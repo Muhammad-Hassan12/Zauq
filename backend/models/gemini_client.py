@@ -57,6 +57,10 @@ def format_grounding_citations(text: str, grounding_meta: Optional[Dict[str, Any
 
     return text
 
+from backend.agent.types import AgentModelTurn, ToolCall, ToolResultMessage
+from backend.models.tool_schemas import to_gemini_tools, normalize_tool_call_name
+from backend.tools.aliases import canonical_to_alias
+
 class GeminiClient:
     def __init__(self, api_key: str = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
@@ -70,14 +74,48 @@ class GeminiClient:
         media_parts: Optional[List[Dict[str, str]]] = None,
         image_parts: Optional[List[Dict[str, str]]] = None,
         enable_search: bool = False,
-        thinking_enabled: bool = False
+        thinking_enabled: bool = False,
+        tools: Optional[List[Any]] = None,
     ) -> Dict[str, Any]:
         contents = []
         all_media = (media_parts or []) + (image_parts or [])
 
-        for idx, msg in enumerate(messages):
-            role = "user" if msg.get("role") in ["user", "system"] else "model"
-            parts = [{"text": msg.get("content", "")}]
+        for idx, raw_msg in enumerate(messages):
+            msg = raw_msg.to_dict() if isinstance(raw_msg, ToolResultMessage) else raw_msg
+            msg_role = msg.get("role", "user")
+
+            # 1. Tool result message (fed back after function execution)
+            if msg_role in ["tool", "function"]:
+                name = msg.get("name") or msg.get("tool_name") or ""
+                alias = canonical_to_alias(name) if "." in name else name
+                content_val = msg.get("content", "")
+                contents.append({
+                    "role": "function",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": alias,
+                            "response": {"name": alias, "content": str(content_val)}
+                        }
+                    }]
+                })
+                continue
+
+            # 2. Assistant message with prior tool calls
+            if msg_role in ["model", "assistant"] and msg.get("tool_calls"):
+                parts = []
+                if msg.get("content"):
+                    parts.append({"text": str(msg["content"])})
+                for tc in msg.get("tool_calls", []):
+                    tc_name = tc.get("name", "") if isinstance(tc, dict) else tc.name
+                    tc_alias = canonical_to_alias(tc_name) if "." in tc_name else tc_name
+                    tc_args = tc.get("arguments", {}) if isinstance(tc, dict) else tc.arguments
+                    parts.append({"functionCall": {"name": tc_alias, "args": tc_args}})
+                contents.append({"role": "model", "parts": parts})
+                continue
+
+            # 3. Standard text & multimodal user / model turn
+            role = "user" if msg_role in ["user", "system"] else "model"
+            parts = [{"text": str(msg.get("content", ""))}]
 
             # Attach multimodal media parts (Images and Audio) to the final user message
             if idx == len(messages) - 1 and role == "user" and all_media:
@@ -118,8 +156,12 @@ class GeminiClient:
                 "parts": [{"text": system_prompt}]
             }
 
-        # Google Search Grounding for live internet access
-        if enable_search:
+        # Native tool declarations or Google Search Grounding
+        if tools:
+            gemini_tools = to_gemini_tools(tools)
+            if gemini_tools:
+                payload["tools"] = gemini_tools
+        elif enable_search:
             payload["tools"] = [{"googleSearch": {}}]
 
         return payload
@@ -227,3 +269,69 @@ class GeminiClient:
                             yield text_chunk
                         except (KeyError, IndexError, json.JSONDecodeError):
                             continue
+
+    async def generate_agent_turn(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Any]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        model_name: Optional[str] = None,
+        media_parts: Optional[List[Dict[str, str]]] = None,
+        image_parts: Optional[List[Dict[str, str]]] = None,
+        thinking_enabled: bool = False,
+    ) -> AgentModelTurn:
+        """Normalized model step in the agent loop for Gemini function calling."""
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY is not set in environment.")
+
+        target_model = model_name or self.default_model
+        model_path = target_model.replace("models/", "") if target_model.startswith("models/") else target_model
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_path}:generateContent?key={self.api_key}"
+        payload = self._prepare_payload(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            media_parts=media_parts,
+            image_parts=image_parts,
+            enable_search=False,
+            thinking_enabled=thinking_enabled,
+            tools=tools,
+        )
+
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            response = await client.post(url, json=payload)
+            if response.status_code != 200:
+                raise RuntimeError(f"Gemini Agent Turn Error ({response.status_code}) for model {model_path}: {response.text}")
+
+            data = response.json()
+            try:
+                candidate = data["candidates"][0]
+                parts = candidate.get("content", {}).get("parts", [])
+
+                text_blocks: List[str] = []
+                tool_calls: List[ToolCall] = []
+
+                for idx, part in enumerate(parts):
+                    if "functionCall" in part:
+                        fc = part["functionCall"]
+                        raw_name = fc.get("name", "")
+                        canon_name = normalize_tool_call_name(raw_name)
+                        args = fc.get("args") or {}
+                        call_id = fc.get("id") or f"gemini_call_{idx+1}"
+                        tool_calls.append(ToolCall(id=call_id, name=canon_name, arguments=args))
+                    elif "text" in part:
+                        text_blocks.append(part["text"])
+
+                raw_text = "\n".join(text_blocks)
+                clean_text = sanitize_response_output(raw_text) if raw_text else None
+
+                return AgentModelTurn(
+                    text=clean_text if clean_text else None,
+                    tool_calls=tool_calls,
+                    raw_metadata={"candidate": candidate}
+                )
+            except (KeyError, IndexError) as e:
+                raise RuntimeError(f"Unexpected response structure from Gemini API: {data} ({e})")
+

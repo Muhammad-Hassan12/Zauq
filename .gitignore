@@ -1,7 +1,13 @@
 # Environment & Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.cert
+*secret*.json
+*credentials*.json
 
 # Python
 __pycache__/
@@ -17,13 +23,21 @@ dist/
 .installed.cfg
 *.egg
 
-# Logs & Temporary Files
+# Logs, Databases & Temporary Files
 logs/
 *.log
 *.log.*
 /tmp/
 .pytest_cache/
 .coverage
+.coverage.*
+htmlcov/
+.cache/
+.mypy_cache/
+.ruff_cache/
+*.sqlite
+*.sqlite3
+*.db
 
 # IDE & OS
 .idea/
@@ -31,3 +45,5 @@ logs/
 *.swp
 *.swo
 .DS_Store
+Thumbs.db
+
