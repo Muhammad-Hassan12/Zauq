@@ -1,13 +1,16 @@
-# Contributing to Zauq
+# Contributing to Zauq (ذوق) v4.0.0
 
-First off, thank you for considering contributing to Zauq! It's people like you that make Zauq such a powerful, community-driven AI engine.
+First off, thank you for considering contributing to Zauq! We welcome contributions that keep Zauq reliable, secure, maintainable, and powerful.
+
+---
 
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
-- **Python 3.11+**
-- **Docker** & **Docker Compose** (Required for the `/run` code execution sandbox and local Supabase instance)
-- **Discord Bot Token** (Create an app in the [Discord Developer Portal](https://discord.com/developers/applications))
+* **Python 3.11+**
+* **Docker Engine** (Required for code execution sandboxing tests)
+* **Discord Bot Token** (Create an app in the [Discord Developer Portal](https://discord.com/developers/applications))
+* **Git**
 
 ### 2. Local Setup
 
@@ -17,58 +20,115 @@ First off, thank you for considering contributing to Zauq! It's people like you 
    cd Zauq
    ```
 
-2. **Set Up Python Environment**:
+2. **Set Up Python Virtual Environment**:
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install --upgrade pip
    pip install -r requirements.txt
+   pip install pytest pytest-asyncio pytest-cov
    ```
 
-3. **Environment Variables**:
-   Copy the example config and fill in your keys:
+3. **Configure Environment Variables**:
    ```bash
    cp .env.example .env
    ```
+   Fill in your API credentials. During local development, feature flags can remain `false` by default.
 
-4. **Run Backend and Bot**:
-   Using Docker Compose (Easiest):
-   ```bash
-   docker-compose up --build
-   ```
-   Or manually:
-   ```bash
-   # Terminal 1: Backend
-   python -m uvicorn backend.main:app --port 8002 --reload
+4. **Run Services**:
+   * **Using Docker Compose (Recommended)**:
+     ```bash
+     docker compose up --build
+     ```
+   * **Or Manually (Multi-Terminal)**:
+     ```bash
+     # Terminal 1: Sandbox Runner (Optional isolated mode)
+     python -m uvicorn backend.sandbox.runner_service:app --port 8001 --reload
 
-   # Terminal 2: Bot
-   python -m bot.client
-   ```
+     # Terminal 2: FastAPI Backend Engine
+     python -m uvicorn backend.main:app --port 8002 --reload
 
-## 🧪 Testing
+     # Terminal 3: Discord Bot Client
+     python -m bot.client
+     ```
 
-Before submitting a Pull Request, please ensure all validation test suites pass. Zauq has a comprehensive set of automated tests:
+---
+
+## 🧪 Testing Guidelines
+
+Zauq v4 includes a modern, 7-stage test suite organized under `tests/` with 100% offline, deterministic coverage (zero paid LLM API calls in CI).
+
+### Running All Tests
+```bash
+pytest tests/ -v
+```
+
+### Running Test Stages Individually
 
 ```bash
-# 1. Test Code Execution Sandbox
-python -m backend.utils.test_sandbox_suite
+# 1. Unit Tests (Agent Runtime, Tool System, Models)
+pytest tests/agent/ tests/tools/ tests/models/ -v
 
-# 2. Test Security, SSRF & Input Bounds
+# 2. Search Subsystem (Query Optimizer, Research v2)
+pytest tests/search/ -v
+
+# 3. Model Context Protocol (MCP Client & Adapters)
+pytest tests/mcp/ -v
+
+# 4. Security Hardening (SSRF, Secret Sanitization, Prompt Injection)
+pytest tests/security/ -v
+
+# 5. Docker Sandbox Tests (Timeout, Concurrency, Permission Semantics)
+pytest tests/sandbox/ -v
+
+# 6. Integration & Regression Checklist Tests
+pytest tests/integration/ tests/observability/ tests/actions/ tests/bot/ tests/chat/ -v
+```
+
+### Legacy Utility Suites (Backward Compatibility)
+```bash
 python -m backend.utils.test_security_hardening
-
-# 3. Test Deep Web Search Engine
+python -m backend.utils.test_sandbox_suite
 python -m backend.utils.test_deep_search
-
-# 4. Test Specifications & Info Commands
 python -m backend.utils.test_info_command
-
-# 5. Test Reference & Reply Ingestion
 python -m backend.utils.test_reply_ingestion
 ```
 
-## 📝 Submitting a Pull Request
-1. Create a new branch: `git checkout -b feature/your-feature-name`
-2. Commit your changes: `git commit -m 'Add some feature'`
-3. Push to the branch: `git push origin feature/your-feature-name`
-4. Open a Pull Request on GitHub.
+---
 
-*Please ensure your code follows standard Python conventions and does not break the `test_security_hardening.py` suite!*
+## 📐 Architecture & Coding Invariants
+
+When adding new features or tools to Zauq v4, strictly maintain these core invariants:
+
+1. **Tool System Contracts (`backend/tools/`)**:
+   * Every tool must define a `ToolSpec` with canonical naming (`category.action` or `mcp.<server>.<action>`).
+   * Tools must declare an explicit `RiskLevel` (`read`, `write`, `destructive`, `privileged`).
+   * Any tool with `write` or `destructive` risk **must require human approval** via the `ActionService`.
+
+2. **Bounded Execution (`backend/agent/`)**:
+   * Never introduce unbounded recursive autonomous loops.
+   * Tool calls are strictly bounded by `AgentBudget` (max 4 steps normal, max 6 steps deep search).
+   * Repeated identical tool calls must trigger the loop detection guard.
+
+3. **Security & Untrusted Data Fencing (`backend/security/`)**:
+   * All external web content, document attachments, and MCP outputs are **untrusted data**.
+   * Tools must fence observations using `fence_tool_data()`.
+   * Never leak API keys, tokens, or credentials into model context or user responses. Always route outputs through `sanitize_secrets()`.
+
+4. **Zero Overhead When Disabled**:
+   * Subsystems governed by feature flags (`AGENT_RUNTIME_ENABLED`, `MCP_ENABLED`) must consume zero background resources when disabled.
+
+---
+
+## 📝 Submitting a Pull Request
+
+1. Create a feature branch:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+2. Commit your changes with clear, descriptive commit messages.
+3. Verify that the complete test suite passes:
+   ```bash
+   pytest tests/
+   ```
+4. Open a Pull Request on GitHub describing your changes and testing methodology.

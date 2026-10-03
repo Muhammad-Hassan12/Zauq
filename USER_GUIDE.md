@@ -1,56 +1,66 @@
-# 🤖 Zauq — Complete Master Guide & Documentation (v3.2.5 — Semantic Memory, Thinking Mode & Fallback Alerts)
+# 🤖 Zauq — Complete Master Guide & Documentation (v4.0.0 — Bounded Agentic Architecture)
 
-**Zauq (ذوق)** is an AgenticEra Hybrid AI Discord Bot built on a high-performance **FastAPI backend engine** and a **`discord.py` thin-client frontend**. It features an explicit 3-Tier model selection router, Deep Web Roaming intelligence, a fully vector-based 3-Layer memory architecture (pgvector), Gemini extended thinking mode, isolated Docker code execution, free neural TTS voice synthesis, AI image generation, AI content moderation, an XP/reputation system, transparent provider fallback notifications, and interactive mini-games.
+**Zauq (ذوق)** is an enterprise-grade, state-of-the-art hybrid AI Discord companion built by **Syed Muhammad Hassan / AgenticEra Systems**. It features a high-performance **FastAPI backend engine**, a lightweight **`discord.py` thin client**, an isolated **Docker Sandbox Runner**, a **Bounded Agent Runtime**, a native **Model Context Protocol (MCP) Client**, **Research v2 live web intelligence**, true **vector-based semantic memory (pgvector)**, interactive **Human-in-the-Loop approval buttons**, and multi-provider AI model routing across **Google Gemini, Anthropic Claude, Alibaba Qwen, DeepSeek, DigitalOcean Gradient, and local Ollama**.
 
 ---
 
 ## 📐 1. Architecture Overview
 
-Zauq is split into two isolated processes running under PM2:
-1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8***` (configurable via `BACKEND_PORT` in `.env`). Handles AI prompt routing, vector embeddings, true semantic memory extraction/retrieval, thinking mode, code execution sandboxing, web search grounding, media rendering, XP tracking, reminders, and content moderation.
-2. **Discord Bot Client (`zauq-bot`)**: Thin client connecting via WebSocket Gateway. Listens for message mentions, thread conversations, voice notes, and 26 slash commands, sending requests to the FastAPI backend.
+Zauq is architected around decoupled, failure-isolated services:
 
-```
-                  ┌─────────────────────────────────────────┐
-                  │          Discord Gateway (WS)           │
-                  │  Voice Notes · Attachments · Slash Tree │
-                  └────────────────────┬────────────────────┘
-                                       │
-                         ┌─────────────▼─────────────┐
-                         │   Zauq Bot (discord.py)   │
-                         │   26 Slash Commands + XP  │
-                         └─────────────┬─────────────┘
-                                       │ HTTP (Port 8***)
-                         ┌─────────────▼─────────────┐
-                         │   FastAPI Backend Engine  │
-                         │  Router · Memory · Media  │
-                         │  Search · Files · Sandbox │
-                         └──────┬──────────────┬─────┘
-                                │              │
-              ┌─────────────────▼───┐      ┌───▼────────────────┐
-              │  Supabase pgvector  │      │  Docker Sandbox    │
-              │ (Semantic Memories  │      │  (Python/JS/Bash)  │
-              │   + Server Lore)    │      └────────────────────┘
-              └─────────────────────┘
+1. **FastAPI Engine (`zauq-backend`)**: Listens on `http://127.0.0.1:8002`. Houses the bounded agent runtime, tool registry, chat orchestrator, multi-provider model router, vector semantic memory, search engine, media processors, and observability pipelines.
+2. **Sandbox Runner (`zauq-sandbox-runner`)**: Dedicated, isolated microservice on `http://127.0.0.1:8001` with exclusive access to the Docker socket. The main backend does not have access to `/var/run/docker.sock`.
+3. **Discord Gateway Bot (`zauq-bot`)**: Thin client connecting via WebSocket. Listens for user mentions, thread messages, voice notes, and 31 slash commands.
+4. **Supabase PostgreSQL (`pgvector`)**: 768-dimensional vector store for L2 user episodic memory, L3 server lore RAG, cost audit logs, and pending approval action tickets.
+
+```text
+                     ┌───────────────────────────────────────────┐
+                     │            Discord Gateway (WS)           │
+                     │   Voice Notes · Messages · 31 Slash Cmds  │
+                     └─────────────────────┬─────────────────────┘
+                                           │
+                          ┌────────────────▼────────────────┐
+                          │      Zauq Bot (discord.py)      │
+                          │   Buttons · Approvals · Voice   │
+                          └────────────────┬────────────────┘
+                                           │ HTTP (Port 8002)
+                          ┌────────────────▼────────────────┐
+                          │     FastAPI Backend Engine      │
+                          │ Tool Registry · Agent Runtime   │
+                          │ Serper Search · MCP Client      │
+                          └──────┬──────────┬───────────┬───┘
+                                 │          │           │
+     Internal Authenticated HTTP │          │           │
+          (X-Internal-Token)     │          │           │
+        ┌────────────────────────▼───┐  ┌───▼───────┐   │
+        │   Isolated Sandbox Runner  │  │  Ollama   │   │
+        │ (Docker Socket Isolation)  │  │(Local VPS)│   │
+        └────────────────────────────┘  └───────────┘   │
+                                                        │
+                                ┌───────────────────────▼───┐
+                                │    Supabase pgvector      │
+                                │(L2 Semantic + L3 Lore RAG)│
+                                └───────────────────────────┘
 ```
 
 ---
 
 ## 🎭 2. Operating Modes & Persona Configuration
 
-Zauq operates in two distinct modes configured via `/mode` at either **Channel** or **Server** scope:
+Zauq operates in two primary modes configured via `/mode` at either **Channel** or **Server** scope:
 
 ### 🛠️ Dev Mode (`dev`)
-- **Focus**: Technical assistance, code reviews, stack trace analysis, and sandboxed code execution.
-- **Temperature**: Low (~`0.2`) for maximum precision and deterministic logic.
-- **Persona**: Senior Software Engineer & Architect (concise, direct, highly technical).
-- **Code Execution**: Enabled by default (`allow_code_exec = true`).
+* **Focus**: Architecture, software engineering, debugging, code testing, and sandboxed code execution.
+* **Temperature**: Low (~`0.2`) for maximum deterministic precision.
+* **Persona**: Senior Software Engineer & Architect (precise, direct, highly technical).
+* **Code Execution**: Enabled by default (`allow_code_exec = true`).
+* **Auto-Code Testing**: Configurable per channel (`off`, `auto`, `always`).
 
 ### 💬 Hangout Mode (`hangout`)
-- **Focus**: Casual server companion, banter, server lore recall, memes, voice TTS, trivia games, voice-to-voice replies, and community engagement.
-- **Temperature**: High (~`0.75`) for expressive, witty, and creative responses.
-- **Persona**: Expressive, funny, and engaging community companion.
-- **Code Execution**: Disabled by default (`allow_code_exec = false`).
+* **Focus**: Casual server companion, banter, server lore recall, memes, voice TTS, trivia mini-games, voice-to-voice replies, and community engagement.
+* **Temperature**: High (~`0.75`) for expressive, witty, and engaging responses.
+* **Persona**: Expressive, funny, and friendly community companion.
+* **Code Execution**: Disabled by default (`allow_code_exec = false`).
 
 #### Operating Mode Commands:
 ```
@@ -61,649 +71,227 @@ Zauq operates in two distinct modes configured via `/mode` at either **Channel**
 
 ---
 
-## 🧠 3. Universal Thinking Mode (`/thinking`) *(v3.2.5 New)*
+## 🧠 3. Universal Thinking Mode (`/thinking`)
 
 Zauq supports **extended deep-thinking and reasoning mode**, togglable per channel by administrators across **all AI models**:
 
-### How Thinking Mode Works
-- **Gemini Models**: Allocates up to **16,384 dedicated thinking tokens** via Google's native `thinkingConfig` API budget.
-- **DigitalOcean (Kimi, GLM, DeepSeek, Qwen), Ollama & Kaggle**: Injects Deep Chain-of-Thought (CoT) multi-phase reasoning directives and automatically expands output token bounds (up to 32k tokens).
-- **Internal Scratchpads Hidden**: Any `<thought>` or `<think>` tags generated internally are automatically stripped before sending to Discord — only the polished final answer is delivered.
+* **Gemini Models**: Allocates up to **16,384 dedicated thinking tokens** via Google's native `thinkingConfig` API budget.
+* **Anthropic, Qwen, DeepSeek & DigitalOcean**: Injects Deep Chain-of-Thought (CoT) multi-phase reasoning directives and automatically expands output token bounds (up to 32k tokens).
+* **Internal Scratchpads Hidden**: Any `<thought>` or `<think>` tags generated internally are automatically stripped before sending to Discord — only the polished final answer is delivered.
 
-This significantly improves response quality for:
-- Complex multi-step technical problems & multi-GPU training scripts
-- Logical, mathematical, and algorithmic reasoning
-- Full-stack codebase architecture decisions
-- Detailed scientific and technical research synthesis
-
-### Usage
 ```
 /thinking mode:on   -> Enable deep reasoning for this channel (all AI models)
 /thinking mode:off  -> Disable thinking mode, return to fast standard output
 ```
 
-> Requires **Administrator** permission or designated admin role.
-
-### Output Tokens (v3.2.5)
-Output token limit is up to **65,536 tokens** (full Gemini capacity) and up to **32,768 tokens** for DigitalOcean/Ollama reasoning models, giving Zauq the ability to generate comprehensive long-form responses, full project codebases, and complete Jupyter notebooks without truncation.
-
 ---
 
-## ⚡ 4. Explicit Model Tier Routing Engine & Clean Taxonomy
+## ⚡ 4. Explicit Model Tier Routing Engine
 
-Unlike traditional bots with automatic cascade fallbacks, Zauq uses **explicit locking**. Whatever tier and provider is selected serves **every request** for that channel or server until changed.
+Unlike bots with arbitrary cascades, Zauq uses **explicit locking**: whatever tier and provider is configured serves every request for that channel or server until changed.
 
-| Tier | Provider Identifier | Display Name | Supported Models |
+### Expanded Tier-1 Provider Catalog (v4.0.0)
+
+| Tier | Provider Identifier | Provider Name | Models Available |
 |---|---|---|---|
-| Tier 1 | `gemini` (alias `google`) | Google AI Studio | `gemini-2.5-flash` (Default), `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-pro-preview`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it` + Google Search Grounding |
-| Tier 1 | `digitalocean` | DigitalOcean Gradient | `kimi-k3`, `kimi-k2.6`, `kimi-k2.5`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `deepseek-v4-pro`, `deepseek-4-flash`, `deepseek-3.2`, `qwen3.8-max`, `qwen3.5-397b-a17b`, `llama-4-maverick`, `llama3.3-70b-instruct`, `minimax-m2.5`, `nemotron-3-ultra-550b` |
-| Tier 2 | `ollama` | Local VPS Model | `qwen3.5:4b` (zero API cost) |
-| Tier 3 | `kaggle` | Kaggle T4 Tunnel | `qwen3.5-t4` (pings `/health` before locking) |
+| **Tier 1** | `gemini` (alias `google`) | Google AI Studio | `gemini-2.5-flash` (Default), `gemini-2.5-pro`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-pro-preview`, `gemma-4-26b-a4b-it` |
+| **Tier 1** | `anthropic` | Anthropic Claude Direct | `claude-sonnet-4-5`, `claude-3-5-sonnet`, `claude-3-5-haiku` |
+| **Tier 1** | `qwen` | Alibaba Qwen Direct | `qwen-turbo`, `qwen-plus`, `qwen-max` |
+| **Tier 1** | `deepseek` | DeepSeek Direct | `deepseek-chat`, `deepseek-coder`, `deepseek-reasoner` |
+| **Tier 1** | `digitalocean` | DigitalOcean Gradient | `glm-5.3`, `glm-5.2`, `kimi-k3`, `llama-4-maverick`, `llama3.3-70b-instruct`, `minimax-m2.5` |
+| **Tier 2** | `ollama` | Local VPS Model | `qwen3.5:4b` (zero API cost) |
+| **Tier 3** | `kaggle` | Kaggle T4 Tunnel | `qwen3.5-t4` (pings `/health` before locking) |
 
 #### Model Management Commands:
 ```
 /model status                               -> Check active tier, provider, model name, and inheritance scope
 /model set tier:1 provider:gemini scope:Server -> Lock entire community default to Google Gemini 2.5 Flash
-/model set tier:1 provider:gemini model:gemini-2.5-pro scope:Channel -> Lock specific channel to Gemini 2.5 Pro
-/model set tier:1 provider:digitalocean model:glm-5.2 -> Lock channel to DigitalOcean GLM-5.2
-/model reset                                -> Clears channel override and reverts to community server default
+/model set tier:1 provider:anthropic model:claude-sonnet-4-5 scope:Channel -> Lock channel to Claude Sonnet 4.5
+/model set tier:1 provider:deepseek model:deepseek-chat -> Lock channel to DeepSeek Chat
+/model reset                                -> Clears channel override and reverts to community default
 ```
 
-### ⚠️ Transparent Provider Fallback Alerts *(v3.2.5 New)*
-When a configured provider (DigitalOcean, Ollama, Kaggle) becomes unreachable or returns an error, Zauq **automatically falls back to Gemini Flash** to guarantee zero user interruption. Starting from v3.2.5, users are **always informed** via an orange embed notification posted after the response:
-
-```
-⚠️ Provider Fallback Activated
-Your configured provider DIGITALOCEAN (`llama3.3-70b-instruct`) was unreachable
-or returned an error.
-
-This response was generated by Gemini 2.5 Flash as an automatic fallback to
-ensure zero interruption.
-─────────────────────────────────────────────────────
-Use /model set to reconfigure your provider, or check if it's online.
-```
+### ⚠️ Transparent Provider Fallback Notifications
+If a secondary provider fails or hits rate limits, Zauq automatically falls back to **Gemini 2.5 Flash** and notifies the user with a transparent embed notification.
 
 ---
 
-## 📄 5. Universal Document, Vision & Voice Note Ingestion (30,000 Token Capacity)
+## 🤖 5. Bounded Agent Runtime & Tool System (v4 New)
 
-Zauq automatically parses attached files in Discord with an expanded ingestion capacity of up to **120,000 characters (~30,000 tokens / ~3,000+ lines of text)** per document:
-- **Multilingual Voice Notes**: `.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus` (Native Gemini audio waveform ingestion for **Urdu (اردو)**, **Roman Urdu**, **Hindi**, **Arabic**, **English**, etc. with zero latency + automatic fallback transcriber for open models)
-- **Code & Text**: `.txt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.md`, `.log`, `.sql`, `.sh` (Parsed completely up to 30,000 tokens)
-- **PDF Documents**: `.pdf` (text extracted page-by-page via `pypdf` with 120k char safety bounds)
-- **Word Documents**: `.docx` (paragraphs and tables extracted via `python-docx`)
-- **Spreadsheets**: `.csv`, `.xlsx` (converted into Markdown tables via `openpyxl`)
-- **Images & Vision**: `.png`, `.jpg`, `.jpeg`, `.webp` (sent natively to Gemini Multimodal Vision, or automatically transcribed via Gemini Flash OCR fallback for text-only models like GLM/DeepSeek)
+When `AGENT_RUNTIME_ENABLED=true`, Zauq operates as a bounded state-machine agent:
 
-**Usage**: Simply attach a file or voice note to your message when mentioning @Zauq. The file is automatically parsed in full and included in the AI context.
-
----
-
-## 📁 6. On-Demand Dynamic File Generation & ZIP Packaging
- 
-Zauq features an enterprise file generation engine capable of outputting up to **65,536 tokens (~250,000+ characters)** per generation *(raised from 8,192 in v3.2.5)*:
-- **On-Demand Standalone Files**: Ask Zauq to generate any full code or document file (e.g. *"convert this notebook to CTransPath in train.ipynb"*, *"generate a FastAPI auth script in auth.py"*, *"make a database schema in schema.sql"*).
-- **Extended 10-Minute Execution Budget (600s)**: High-compute requests (such as massive PyTorch/Kaggle `.ipynb` notebooks, complex model conversions, or multi-module codebases) have up to a **10-minute generation window** so complex synthesis never cuts off.
-- **Live Progress Heartbeat**: During long generations, Zauq dynamically updates its Discord status embed every 15 seconds (`💭 Thinking & analyzing context...` $\to$ `🧠 Formulating comprehensive response...` $\to$ `✍️ Writing & refining details...` $\to$ `✨ Finalizing and polishing output...`) so you always have real-time visibility.
-- **Dual Presentation**: Displays an interactive syntax-highlighted code block directly in chat **and uploads the complete, standalone file as a native Discord attachment (`discord.File`)** for 1-click download.
-- **Multi-File ZIP Archives**: If you request multiple files at once (e.g. HTML + CSS + JS or Backend + Dockerfile), Zauq automatically bundles all generated files into an in-memory `project_files.zip` download archive.
-- **Commands**: `/file generate filename:app.py prompt:...` or `/create_file filename:schema.sql prompt:...` or direct natural language request in chat.
-
----
-
-## 🌐 7. Deep Web Roaming, Autonomous Search & URL Scraper
-
-Zauq features an autonomous deep web intelligence engine designed to provide comprehensive, factual, and real-time research without training cutoffs:
-
-### 1. Autonomous Deep Web Roaming (100% Free)
-- When a search is triggered, Zauq doesn't just look at 20-word search snippets.
-- It concurrently scrapes and reads the **full readable markdown content of the top 2–3 result webpages** in parallel via `asyncio.gather()` and Jina Reader / SSRF-safe parsers.
-- Injects authoritative, full-article research paragraphs directly into the model context.
-
-### 2. Multi-Query NLP Optimization & Decomposition
-- Conversational queries (e.g. *"research about the most isolated places on earth where it is strictly not allowed to go"*) are cleaned of filler words and decomposed into 2–3 laser-targeted keyword queries to maximize search coverage.
-
-### 3. Targeted Domain & Category Filters
-- Filter searches directly to specialized domains:
-  - **`all`**: Standard open web search
-  - **`github`**: Targets `site:github.com` for source code, repositories, and technical issues
-  - **`arxiv`**: Targets `site:arxiv.org` for scientific research papers and machine learning pre-prints
-  - **`docs`**: Targets official developer documentation (`docs.python.org`, `developer.mozilla.org`, `fastapi.tiangolo.com`, `devdocs.io`)
-  - **`wikipedia`**: Targets `site:wikipedia.org`
-  - **`news`**: Targets Reuters, Hacker News, TechCrunch
-
-### 4. Automatic Natural Language Search Intent (No Commands Needed)
-- You **do not** have to type `/search` to use web search.
-- Whenever you chat with Zauq (via `@Zauq` or in threads), Zauq automatically triggers live search whenever your message contains:
-  - **Search instructions**: *"search for...", "research about...", "look up...", "find info on...", "google it..."*
-  - **Real-time & temporal queries**: *"latest news...", "today", "yesterday", "current version...", "price of..."*
-  - **Deep research inquiries**: *"compare X and Y...", "benchmarks for...", "what are the most isolated places on earth..."*
-
-### 5. Live URL Content Reader
-- Drop any HTTP/HTTPS link directly in chat (e.g. documentation, arXiv papers, news articles) and Zauq will automatically fetch and read the webpage content using Jina Reader.
-
----
-
-## 🧠 8. Memory Architecture — True Semantic Vector Memory *(v3.2.5 Powerfix)*
-
-Zauq maintains context across 3 distinct memory layers:
-
-### L1 — Working Context Window
-- Automatically fetches the last **8 messages** in a thread or channel.
-- Direct in-channel replies by default with automatic thread continuity when chatting inside threads or upon explicit request.
-- Intelligent message chunking: messages over 1,900 characters are split at line breaks and code block boundaries to preserve Markdown formatting.
-
-### L2 — User Episodic Semantic Memory (`user_memories`) *(Fully rewritten in v3.2.5)*
-
-Every user fact is now a true **living vector memory** — not just a stored string.
-
-#### How it works:
-
-**Storage pipeline (after every conversation):**
-1. LLM extracts notable facts with `confidence` and `importance` scores
-2. **768-dim embeddings generated** for every fact via `gemini-embedding-001` (stored, not null)
-3. **Deduplication**: cosine similarity ≥ 0.92 → skip insert, reinforce existing; 0.80–0.92 → reinforce + insert
-4. **Contradiction detection**: new facts with negation signals (*"stopped using X", "no longer prefers Y"*) halve the `importance_score` of contradicted facts and tag new facts as corrections
-5. **Importance scoring**: LLM-assigned 0–1 importance, boosted for `personal`/`technical` categories
-6. **Memory expiry**: expired memories (importance < 0.15) pruned before new facts stored
-
-**Retrieval pipeline (on every chat message):**
-1. Query embedding generated from the user's current message
-2. `match_user_memories` RPC called — results ranked by **`similarity × importance_score`** (semantically relevant AND important memories float up)
-3. Fallback to recency query if RPC unavailable or user has no embeddings yet
-4. Accessed memories get `access_count++` and refreshed `last_accessed_at` (reinforcement signal)
-
-**24h Background Decay Worker:**
-- Memories not accessed in **30+ days** → importance reduced by 5% per cycle
-- Memories with importance < 0.15 → permanently pruned
-- Keeps user memory lean, current, and relevant without any manual intervention
-
-**Injected in system prompt as:**
-```
-[Known User Facts for @username]:
-- [TECHNICAL]: Uses Python and FastAPI for backend development
-- [PREFERENCE]: Prefers dark mode and minimalist UI
-- [⚠️ UPDATED TECHNICAL]: Switched from MongoDB to PostgreSQL
+```text
+User Message ──► Capability Router ──► Tool Selection ──► Agent Runtime Loop (Max 4-6 Steps)
+                                                                 │
+                  ┌──────────────────────────────────────────────┴─────────────────────────────────┐
+                  ▼                                              ▼                                 ▼
+           web.search / fetch                               code.execute                 mcp.<server>.<tool>
+         (Serper + Research v2)                         (Hardened Sandbox)               (External Protocol)
 ```
 
-### L3 — Server Lore RAG (`server_lore`)
-- Knowledge base containing server rules, inside jokes, documentation, or ingested GitHub READMEs.
-- Vector similarity search (`match_server_lore` pgvector RPC) retrieves top-3 matching facts and grounds the model's answer in server-specific context.
-- Lore is added via `/remember` or `/ingest_repo` and searched automatically during every chat.
+### Safety & Reliability Guarantees:
+* **Strict Step Budgets:** Normal requests: **max 4 tool steps**; Deep search: **max 6 tool steps**; Global hard cap: **8 steps**.
+* **Direct Answer Shortcut:** Queries that do not need tools make **0 tool calls**, responding with zero added latency.
+* **Loop Detection (Duplicate Call Guard):** Blocks repeating identical tool calls with identical arguments.
+* **Structured Error Handling:** Tool exceptions become structured observations, preventing crashes.
+* **Output Character Capping:** Tool outputs are capped to `SANDBOX_MAX_OUTPUT_CHARS` (12,000 characters) before context injection.
+* **Untrusted Content Fencing:** All external data is tagged with `[BEGIN UNTRUSTED TOOL DATA]` boundaries.
 
----
-
-## 📜 9. Complete Slash Command Reference (27 Command Groups · 36 Actions)
-
-### 🎯 Core & Mode Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/info` | View complete live specifications, active model tier, mode, and engine parameters | `/info` |
-| `/mode` | Switch channel or community server operating mode | `/mode mode:dev scope:Server` or `/mode mode:hangout` |
-| `/mode_reset` | Clear channel mode override and revert to community default | `/mode_reset` |
-| `/summarize` | Summarize the current thread/channel into bullet points | `/summarize length:brief` or `/summarize length:detailed` |
-| `/thinking` | Toggle Gemini extended reasoning mode for this channel *(admin only)* | `/thinking mode:on` or `/thinking mode:off` |
-
-**`/info`** — Displays a comprehensive, categorized system dashboard showing:
-- **Engine & Attribution**: Engine version (`v3.2.5`), Apache 2.0 license, and creator attribution (`Syed Muhammad Hassan / AgenticEra Systems`).
-- **Active Model & Tier**: Current tier number (Tier 1/2/3), provider (Google AI Studio, DigitalOcean, Ollama, Kaggle), model name, and configuration scope (`Channel-Specific Override` vs `Community Server Default`).
-- **Operating Mode & Execution**: Active mode (`Dev Mode` vs `Hangout Mode`), temperature setting, thinking mode status, and Docker sandbox code execution status.
-- **Context & Hardware Bounds**: 30,000 token input capacity (~120k chars), 65,536 token output limit, 8-message working window, and Docker limits (`--network none`, `256MB RAM`, `0.5 CPU`).
-- **Intelligence Subsystems**: Web Search (Deep Roaming + Grounding), Voice TTS (19 voices, 8 languages), Image Gen, Thinking Mode, and 3-Layer pgvector memory.
-
-**`/mode`** — Switches operating mode between Dev Mode (technical, low temp) and Hangout Mode (casual, high temp). Supports `scope: Channel` (affects current channel only) or `scope: Server` (sets permanent community default for all unconfigured channels). Requires administrator or authorized role.
-
-**`/mode_reset`** — Clears a channel's mode override so it inherits the community server default mode.
-
-**`/summarize`** — Fetches the last 50 messages from the current channel or thread and sends them to the active AI model with a summarization prompt. Returns a clean bullet-point summary embed. Supports `brief` (3-5 bullet points) and `detailed` (comprehensive) modes.
-
-**`/thinking`** *(v3.2.5 New)* — Toggles extended deep-reasoning mode for the current channel across all AI models:
-- **`mode:on`** → Enables deep reasoning mode (16k–32k token budgets). The model reasons systematically before responding. Ideal for complex technical questions, Kaggle/GPU architectures, and research tasks.
-- **`mode:off`** → Disables thinking mode. Faster standard output.
-- Works across all model tiers (Gemini, DigitalOcean, Ollama, Kaggle). Requires admin or authorized role.
-
----
-
-### 🌐 Search & File Generation Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/search` | Deep web roaming search with full-page reading, deep toggle & category filters | `/search query:Python 3.13 deep:True category:Developer Docs` |
-| `/file generate` | Generate a complete downloadable code or document file on demand | `/file generate filename:app.py prompt:FastAPI with JWT auth` |
-| `/create_file` | Shortcut to generate a complete downloadable project file | `/create_file filename:schema.sql prompt:PostgreSQL users table` |
-
-**`/search`** — Performs deep web research across the live internet:
-- `query` (Required): The question, topic, or technology to research.
-- `deep` (Optional, Default: `True`): Toggles between **Autonomous Deep Web Roaming** (visits and reads top 3 full pages in parallel) and **Quick Search**.
-- `category` (Optional): Filter searches by domain category:
-  - `🌐 All Web (General)`
-  - `💻 GitHub (Code & Repos)`
-  - `📑 ArXiv (Research Papers)`
-  - `📚 Developer Docs (APIs & Frameworks)`
-  - `📖 Wikipedia (Encyclopedia)`
-  - `📰 News & Tech (Recent Updates)`
-
-**`/file generate`** / **`/create_file`** — Generates complete, un-truncated standalone files up to **65,536 tokens** *(raised from 8,192 in v3.2.5)*. Displays an interactive code preview in Discord and attaches the standalone `.py`, `.html`, `.json`, `.sql`, `.md`, or `.css` file as a native downloadable attachment.
-
----
-
-### 🤖 Model Management Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/model status` | View active model tier, provider, model name, and inheritance scope | `/model status` |
-| `/model set` | Set model tier/provider (channel-specific or permanent community default) | `/model set tier:1 provider:gemini scope:Server model:gemini-2.5-pro` |
-| `/model reset` | Clear channel model override and revert to community server default | `/model reset` |
-
-**`/model status`** — Displays the currently active model for this channel, including tier number, provider name, specific model, and whether the setting is a **Channel-Specific Override**, **Community Server Default**, or **System Fallback**.
-
-**`/model set`** — Locks the channel or entire server to a specific model tier and provider. Supports `scope: Channel` vs `scope: Server`. Requires administrator or authorized role.
-
-**`/model reset`** — Clears a channel's model override so it inherits the community server default model.
-
-> **Note**: If your configured provider is unavailable, Zauq automatically falls back to Gemini Flash and sends an **⚠️ orange fallback notification embed** so you always know when and why a fallback occurred.
-
----
-
-### ⚙️ Sandboxed Code Execution (`/run`, Apps ➔ Run Code)
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/run` | Execute code in isolated Docker sandbox (opens multiline popup modal if no code passed) | `/run language:Python 3` or `/run file:script.py` |
-| `Run Code Snippet` | Message Context Menu App: Right-click message containing code to run instantly | `Apps ➔ Run Code Snippet` |
-
-**`/run`** — Runs code snippets and complete programs inside ephemeral, isolated Docker containers with 4 flexible input methods:
-1. **Interactive Multiline Modal Editor**: Run `/run` without code or file to pop up a full-screen paragraph editor with Enter-key newlines, indentation, and paste support (up to 4,000 characters).
-2. **Script File Upload (`file:`)**: Attach a `.py`, `.js`, or `.sh` script file directly to run programs up to 50KB.
-3. **Inline Fast One-Liner (`code:`)**: Fast single-line execution for quick math and one-liners.
-4. **Message Context Menu (`Run Code Snippet`)**: Right-click any Discord message containing markdown code blocks (` ```python ... ``` `) and select **Apps ➔ Run Code Snippet** to execute it in Docker with 1 click.
-
-- **Supported Languages**: Python 3 (`python:3.11-slim`), JavaScript / Node.js (`node:18-alpine`), Bash (`alpine:latest`)
-- **Security Constraints**: `--network none` (zero internet access), `--memory 256m`, `--cpus 0.5`, `--pids-limit 50`, `--read-only`, 5.0-second execution timeout
-- **Access Control**: Gated behind `channel_profiles.allow_code_exec` — enabled by default in Dev Mode, disabled in Hangout Mode
-
+#### Agent Status & Discovery Commands:
 ```
-# Mode 1: Opens interactive multiline popup editor
-/run language:Python 3
-
-# Mode 2: Upload script file directly
-/run file:solution.py
-
-# Mode 3: Quick inline one-liner
-/run code:print([x**2 for x in range(10)]) language:Python 3
-
-# Mode 4: Right-click message -> Apps -> Run Code Snippet
+/agent status -> High-level overview: runtime status, step budgets, search provider, and MCP connections
+/agent tools  -> List all registered tools, their risk levels, origin (native vs MCP), and guild scopes
 ```
 
 ---
 
-### 🧠 Memory & Lore Commands
+## 🔍 6. Production Web Search & Research Mode v2
+
+Zauq v4 features an authoritative live search engine:
+
+* **Dual Provider Architecture:** Production **Serper.dev** Google Search API with automatic **DuckDuckGo** fallback.
+* **In-Memory TTL Caching:** Frequently searched queries are cached in memory (default 300s TTL).
+* **SSRF-Safe Fetcher:** Follows redirect chains while strictly validating each hop against private networks, cloud metadata (`169.254.169.254`), and loopback addresses.
+* **Research Mode v2 (Bounded Flow):**
+  1. **Query Decomposition:** Strips conversational filler and expands multi-aspect search terms.
+  2. **Parallel Page Fetching:** Fetches top sources concurrently under a concurrency semaphore (`WEB_FETCH_CONCURRENCY=3`).
+  3. **Boilerplate & Excerpt Filtering:** Removes cookie notices, navigation headers, and extracts dense evidence blocks.
+  4. **Markdown Citations:** Synthesizes verified markdown sources (`• [Title](url)`).
 
-| Command | Description | Usage Example |
-|---|---|---|
-| `/remember` | Save a server lore fact, rule, or inside joke into vector memory | `/remember type:inside_joke fact:We call CI failures "oopsies"` |
-| `/forget` | Purge all stored episodic memory facts for your User ID | `/forget` |
-| `/privacy` | Display Zauq's data privacy disclosure | `/privacy` |
-
-**`/remember`** — Stores a piece of server knowledge (rules, inside jokes, documentation, or facts) into the Supabase `server_lore` table with a 768-dim vector embedding. This lore is automatically retrieved via RAG during future conversations. Types: `rule`, `inside_joke`, `doc`, `repo`.
-
-**`/forget`** — Permanently deletes all stored episodic user facts (L2 memory) associated with your Discord User ID from Supabase. This is irreversible and GDPR-compliant. Also clears any computed embeddings and importance scores.
-
-**`/privacy`** — Displays Zauq's data privacy policy, explaining what data is stored, how it's used, and the zero model-training guarantee.
-
----
-
-### 🐙 GitHub Integration Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/github pr` | Fetch and summarize a GitHub Pull Request diff | `/github pr repo:owner/name pr_number:12` |
-| `/github issue` | Fetch and display a GitHub Issue description | `/github issue repo:owner/name issue_number:5` |
-| `/ingest_repo` | Ingest a GitHub repository README into server lore | `/ingest_repo repo:owner/name` |
-
-**`/github pr`** — Fetches the diff and metadata for a GitHub Pull Request using the GitHub API, then summarizes the changes using the active AI model.
-
-**`/github issue`** — Fetches and displays the title, body, labels, and status of a GitHub issue in a clean embed.
-
-**`/ingest_repo`** — Downloads the README.md from a public GitHub repository and stores it as server lore in the vector database. This allows Zauq to answer questions about your project documentation using RAG search.
-
----
-
-### 🔊 Voice & TTS Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/tts` | Generate high-quality neural voice speech | `/tts text:Hello world voice:Christopher (US Male)` |
-| `/voice join` | Connect Zauq to your current voice channel | `/voice join` |
-| `/voice leave` | Disconnect Zauq from the voice channel | `/voice leave` |
-
-**`/tts`** — Converts text into high-quality neural speech using Microsoft Edge Neural TTS (zero API cost). Outputs an `.mp3` file uploaded as a Discord attachment. Supports **19 voices across 8 languages**:
-
-| Voice | Language | Gender |
-|---|---|---|
-| `Christopher` | English (US) | Male |
-| `Ava` | English (US) | Female |
-| `Guy` | English (US) | Male |
-| `Sonia` | English (UK) | Female |
-| `Brian` | English (UK) | Male |
-| `Asad` | Urdu (PK) | Male |
-| `Uzma` | Urdu (PK) | Female |
-| `Madhur` | Hindi (IN) | Male |
-| `Swara` | Hindi (IN) | Female |
-| `Hamed` | Arabic (SA) | Male |
-| `Zariyah` | Arabic (SA) | Female |
-| `Alvaro` | Spanish (ES) | Male |
-| `Elvira` | Spanish (ES) | Female |
-| `Henri` | French (FR) | Male |
-| `Denise` | French (FR) | Female |
-| `Conrad` | German (DE) | Male |
-| `Katja` | German (DE) | Female |
-| `Keita` | Japanese (JP) | Male |
-| `Nanami` | Japanese (JP) | Female |
-
-
-**`/voice join`** — Connects Zauq to the voice channel you're currently in.
-
-**`/voice leave`** — Disconnects Zauq from the voice channel.
-
----
-
-### 🖼️ Media Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/image` | Generate AI art from a text prompt | `/image prompt:a sunset over mountains` |
-| `/meme` | Render text-overlay memes with impact font styling | `/meme top_text:When the code works bottom_text:On the first try` |
-
-**`/image`** — Generates AI visual art from a text prompt. Supports 3 model providers:
-
-| Model | Provider | Cost |
-|---|---|---|
-| `Gemini Flash Image` (Default) | Google AI Studio | **Free** |
-| `Stable Diffusion 3.5 Large` | DigitalOcean Gradient | Paid |
-| `Ideogram 3.0 Turbo` | DigitalOcean Gradient | Paid |
-
-The default model is **Gemini Flash Image** which uses Google's `gemini-3.1-flash-image` model via the existing Gemini API key — **completely free**. Outputs a 1024x1024 PNG image attached as a Discord embed.
-
-**`/meme`** — Renders a meme image locally using Pillow with Impact-style font and outline text. Customizable top/bottom text, background color, and text color. No API calls required.
-
----
-
-### 🎮 Games & XP Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/trivia` | Play interactive trivia with difficulty levels & XP rewards | `/trivia difficulty:Hard` |
-| `/rank` | View your XP level, server rank, and progress | `/rank` |
-| `/leaderboard` | View top 10 server members by XP | `/leaderboard` |
-
-**`/trivia`** — Launches an interactive multiple-choice trivia question with Discord UI buttons (A, B, C, D). Features:
-- **Difficulty levels**: Easy, Medium, Hard — each with appropriately challenging questions
-- **XP rewards**: +5 XP for correct answers, +1 XP for participation
-- **Server lore trivia**: If server lore exists, trivia questions may be generated from your server's knowledge base
-- **Tech topics**: Python, JavaScript, Linux, Databases, Networking, Git, Docker, AI/ML
-- **60-second timeout** with auto-disable buttons
-
-**`/rank`** — Shows your personal XP stats including: current XP total, level, server rank position, messages sent, commands used, trivia stats, and streak days. Displayed as a rich embed with a progress bar to the next level.
-
-**`/leaderboard`** — Shows the top 10 users in the server ranked by XP. Displays username, XP total, level, and a visual bar chart. XP is earned through:
-- Messages: **+1 XP** per message
-- Commands: **+2 XP** per command used
-- Trivia correct: **+5 XP** per correct answer
-- Trivia participation: **+1 XP** per attempt
-
-**Level Formula**: `level = floor(sqrt(xp / 100)) + 1`
-
----
-
-### ⏰ Utility Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/remind` | Schedule a reminder message (1 min to 7 days) | `/remind message:Deploy to prod in_minutes:30` |
-| `/export` | Export conversation history as a Markdown file | `/export format:markdown` |
-
-**`/remind`** — Schedules a reminder that Zauq will post in the same channel after the specified number of minutes. Stored in the `scheduled_reminders` Supabase table. A background worker polls every 30 seconds for due reminders and posts them as embeds with a user mention.
-- **Range**: 1 minute to 10,080 minutes (7 days)
-- **Example**: `/remind message:"Review PR #42" in_minutes:60` → Zauq posts a reminder in 1 hour
-
-**`/export`** — Fetches the last 100 messages from the current channel/thread and exports them as a formatted Markdown (`.md`) file uploaded as a Discord attachment. Preserves timestamps, usernames, and code blocks. Supports `markdown` and `text` formats.
-
----
-
-### 🛡️ Moderation Commands (Admin)
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/moderation enable` | Enable or disable AI content moderation for the server | `/moderation enable enabled:True` |
-| `/moderation sensitivity` | Set AI content filtering sensitivity | `/moderation sensitivity level:high` |
-| `/moderation log` | View recent moderation log entries | `/moderation log` |
-
-**`/moderation enable`** — Toggles AI-powered content moderation for the server. When enabled, every message mentioning Zauq is first checked by an AI content filter before processing. Messages classified as `toxic` are automatically deleted, and the user receives a DM warning. Messages classified as `borderline` are logged for admin review. Requires **Administrator** permission.
-
-**`/moderation sensitivity`** — Sets the sensitivity level of the AI content filter: `low` (only extreme content), `medium` (balanced), or `high` (strict filtering). Requires **Administrator** permission.
-
-**`/moderation log`** — Displays the last 10 moderation actions taken in this server, including flagged messages, warnings issued, and deleted messages. Shows severity, action taken, and timestamp. Requires **Administrator** permission.
-
----
-
-### 📊 Admin & Analytics Commands
-
-| Command | Description | Usage Example |
-|---|---|---|
-| `/admin set_role` | Designate an upper role with management permissions for Zauq | `/admin set_role role:@AI-Admin` |
-| `/admin memory` | View server memory and lore vector stats | `/admin memory` |
-| `/admin channels` | View channels with configured AI profiles | `/admin channels` |
-| `/stats` | View server request volume, latency, and provider metrics | `/stats` |
-
-**`/admin set_role`** — Designates an upper Discord role (e.g. `@AI-Admin` or `@Moderator`) allowing members with this role to configure Zauq's model tiers, operating modes, and server settings without needing full Discord Administrator permissions. Leave `role` blank to clear. Requires **Administrator** permission.
-
-**`/admin memory`** — Shows detailed memory statistics including: total user memories stored (with embeddings), total server lore entries, total API requests processed, and average response latency. Data sourced from Supabase. Requires **Administrator** permission.
-
-**`/admin channels`** — Lists all channels in the server that have been configured with AI profiles (via `/mode`, `/model set`, or `/thinking`). Shows each channel's operating mode, temperature, and thinking mode status. Requires **Administrator** permission.
-
-**`/stats`** — View server-level analytics: total request volume, average response latency, and provider breakdown (Gemini vs DO vs Ollama usage). Available to all users.
-
----
-
-## 🏆 10. XP & Reputation System
-
-Zauq tracks user engagement through an XP and leveling system:
-
-### How XP is Earned
-| Action | XP Reward |
-|---|---|
-| Sending a message (when Zauq is mentioned) | +1 XP |
-| Using any slash command | +2 XP |
-| Correct trivia answer | +5 XP |
-| Trivia participation (wrong answer) | +1 XP |
-
-### Leveling
-- **Formula**: `Level = floor(sqrt(XP / 100)) + 1`
-- **Level 1**: 0-99 XP
-- **Level 2**: 100-399 XP
-- **Level 3**: 400-899 XP
-- **Level 4**: 900-1599 XP
-- And so on (exponential scaling)
-
-### Tracked Stats
-- Total XP and Level
-- Messages count
-- Commands used
-- Trivia correct / played
-- Streak days (consecutive days of activity)
-- Last active timestamp
-
----
-
-## 🛡️ 11. AI Content Moderation
-
-When enabled, Zauq uses AI to automatically moderate incoming messages:
-
-### How It Works
-1. Each message mentioning Zauq is sent to a lightweight AI classifier
-2. The classifier categorizes it as: `safe`, `borderline`, or `toxic`
-3. Actions are taken automatically based on severity:
-
-| Classification | Action |
-|---|---|
-| `safe` | Message processed normally |
-| `borderline` | Logged to `moderation_log` table for admin review |
-| `toxic` | Message deleted + user receives DM warning |
-
-### Configuration
-- **Enable**: `/moderation enable enabled:True`
-- **Sensitivity**: `/moderation sensitivity level:low|medium|high`
-- **Audit**: `/moderation log` to review recent actions
-
-All moderation actions are logged to the `moderation_log` Supabase table with: guild, channel, user, message content, action taken, severity, and reason.
-
----
-
-## 🔌 12. Plugin System
-
-Zauq supports community-made extensions through the plugin system:
-
-### Creating a Plugin
-1. Create a Python file in `bot/plugins/` (e.g., `my_plugin.py`)
-2. The file must contain an `async def setup(bot)` entrypoint
-3. Plugins are automatically discovered and loaded on bot startup
-
-### Plugin Template
-```python
-import discord
-from discord.ext import commands
-
-class MyPlugin(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-
-    @discord.app_commands.command(name="mycommand", description="My custom command")
-    async def my_command(self, interaction: discord.Interaction):
-        await interaction.response.send_message("Hello from my plugin!")
-
-async def setup(bot: commands.Bot):
-    await bot.add_cog(MyPlugin(bot))
 ```
-
-### Plugin Guidelines
-- Plugins are loaded **after** all built-in cogs
-- Each plugin file is loaded as a separate Discord extension
-- Failed plugins are logged but don't crash the bot
-- Place plugins in `/root/Zauq/bot/plugins/`
-
----
-
-## 🔒 13. Security, Rate Limits & Privacy
-
-### Rate Limiting Middleware
-- Per-Guild Limit: Max **30 requests / minute**
-- Per-User Limit: Max **10 requests / minute**
-- Returns HTTP `429 Too Many Requests` when limits are exceeded
-- Automatic cleanup of stale rate limit entries every 5 minutes
-
-### Sandbox Security
-- Executed code runs inside non-root Docker containers
-- **`--network none`**: Zero network access
-- **`--memory 256m`**: 256MB RAM cap
-- **`--cpus 0.5`**: Half CPU core limit
-- **5-second timeout**: Kills long-running processes
-- Ephemeral containers: destroyed after execution
-
-### Zero Model-Training Guarantee
-- Message data is processed strictly in real-time to generate responses
-- **No user messages are ever used to fine-tune or train third-party models**
-- All AI providers (Google, DigitalOcean) are used via their API-only endpoints
-
-### Data Deletion Rights (GDPR)
-- Users can invoke `/forget` at any time to permanently wipe their stored vector memories from Supabase
-- `/privacy` command displays full data handling disclosure
-
----
-
-## 🔧 14. Process Management (PM2 Commands)
-
-To manage Zauq on your VPS:
-
-```bash
-# Check status of all processes
-pm2 status
-
-# View live Zauq backend & bot logs
-pm2 logs zauq-backend
-pm2 logs zauq-bot
-
-# Restart Zauq services only (safe — other apps untouched)
-pm2 restart zauq-backend zauq-bot
-
-# Restart with environment variable updates
-pm2 restart zauq-backend zauq-bot --update-env
-
-# Save process state for automatic reboot recovery
-pm2 save
-
-# View structured log file
-tail -f /root/Zauq/logs/zauq.log
-```
-
-### Structured Logging
-All Zauq components use Python's `logging` module with a centralized configuration:
-- **Format**: `[timestamp] [LEVEL] [module_name] message`
-- **Output**: Console + rotating file (`logs/zauq.log`)
-- **Modules**: `zauq.bot`, `zauq.chat`, `zauq.media`, `zauq.rag`, `zauq.episodic`, `zauq.memory_worker`, `zauq.metrics`, `zauq.embeddings`, `zauq.trivia`, `zauq.plugins`, `zauq.admin`, `zauq.reminders`
-
----
-
-## 🗄️ 15. Database Tables
-
-Zauq uses the following Supabase tables:
-
-| Table | Purpose | v3.2.5 Changes |
-|---|---|---|
-| `channel_profiles` | Per-channel mode, temperature, and persona settings | Added `thinking_enabled BOOLEAN` |
-| `model_selections` | Per-channel model tier, provider, and model name | — |
-| `guild_configs` | Per-guild default mode, moderation settings | — |
-| `user_memories` | L2 episodic user facts with true vector embeddings | Added `importance_score`, `last_accessed_at`, `access_count` |
-| `server_lore` | L3 server knowledge base with vector embeddings | — |
-| `request_logs` | API request metrics (latency, model, provider) | — |
-| `user_stats` | XP, level, messages, commands, trivia stats per user | — |
-| `scheduled_reminders` | Pending and delivered reminder messages | — |
-| `moderation_log` | AI moderation actions (flagged, warned, deleted) | — |
-
-### v3.2.5 Supabase Migrations
-Run these in your Supabase SQL Editor if upgrading from a previous version:
-```sql
--- M1: Thinking mode flag
-ALTER TABLE channel_profiles ADD COLUMN IF NOT EXISTS thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-
--- M2: Enhanced memory fields
-ALTER TABLE user_memories
-  ADD COLUMN IF NOT EXISTS importance_score DOUBLE PRECISION NOT NULL DEFAULT 1.0,
-  ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ADD COLUMN IF NOT EXISTS access_count INT NOT NULL DEFAULT 0;
-
--- M3: Vector similarity RPC for user memories (run as-is)
-CREATE OR REPLACE FUNCTION match_user_memories(
-    query_embedding vector(768), match_user_id TEXT,
-    match_threshold float DEFAULT 0.65, match_count int DEFAULT 5
-) RETURNS TABLE (memory_id UUID, user_id TEXT, category TEXT, fact_content TEXT,
-    similarity float, importance_score DOUBLE PRECISION, created_at TIMESTAMPTZ)
-LANGUAGE plpgsql AS $$
-BEGIN
-    RETURN QUERY SELECT m.memory_id, m.user_id, m.category, m.fact_content,
-        1 - (m.embedding <=> query_embedding) AS similarity, m.importance_score, m.created_at
-    FROM user_memories m
-    WHERE m.user_id = match_user_id AND m.embedding IS NOT NULL
-      AND 1 - (m.embedding <=> query_embedding) > match_threshold
-    ORDER BY (1 - (m.embedding <=> query_embedding)) * m.importance_score DESC LIMIT match_count;
-END; $$;
-
--- M4: Indexes for decay worker performance
-CREATE INDEX IF NOT EXISTS idx_user_memories_importance ON user_memories(importance_score ASC);
-CREATE INDEX IF NOT EXISTS idx_user_memories_last_accessed ON user_memories(last_accessed_at ASC);
+/search query:"FastAPI dependency injection patterns" category:all deep:True
 ```
 
 ---
 
-*Created for Syed Muhammad Hassan / AgenticEra Systems — Zauq v3.2.5 Master Documentation*
+## 📦 7. Code Sandbox & Docker Socket Isolation
+
+Zauq executes user and agent code inside ephemeral, hardened Docker containers:
+
+* **Docker Socket Isolation:** The main backend does not have access to `/var/run/docker.sock`. All execution requests are routed over internal authenticated HTTP to the dedicated `sandbox-runner` microservice.
+* **Container Hardening:** `--network none`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--memory 256m`, `--cpus 0.5`, `--pids-limit 50`, `--read-only`, non-root user `65534:65534`.
+* **Image Allowlist:** `python:3.11-slim`, `node:18-alpine`, `alpine:latest` (bash).
+* **Automatic Code Testing Modes:**
+  * `off`: Standard execution only when requested.
+  * `auto`: Automatically test code if the user prompt requests testing or verification.
+  * `always`: System prompt directive forces the model to test code via `code.execute` before final response.
+* **1-Attempt Self-Repair Loop:** If code fails in Dev Mode, Zauq feeds stderr back into context for exactly 1 bounded repair attempt.
+
+```
+/run language:python code:print("Hello from Zauq Sandbox!")
+```
+
+---
+
+## 🛡️ 8. Human-in-the-Loop Confirmation System
+
+To prevent unintended side effects, Zauq implements a strict tool risk classification system:
+
+| Risk Level | Description | Behavior |
+|---|---|---|
+| `read` | Read-only queries (`web.search`, `web.fetch`, read APIs) | Auto-executed |
+| `write` | Creates or modifies resources (send message, create issue) | **Requires Human Confirmation** |
+| `destructive` | Deletes or irreversibly mutates data | **Requires Human Confirmation** |
+| `privileged` | Host/code execution (`code.execute`) | Requires channel permission allowlist |
+
+### Interactive Approval Embed
+When an agent attempts a `write` or `destructive` action:
+1. The tool execution is suspended and staged in `pending_actions`.
+2. Zauq posts an interactive Discord embed detailing the action, arguments, and risk level.
+3. Features **Approve** and **Deny** buttons.
+4. Only the user who initiated the request (or a Server Administrator) can click Approve.
+5. Tickets automatically expire after **5 minutes** if unhandled.
+
+---
+
+## 🔌 9. Model Context Protocol (MCP) Client Layer
+
+Zauq connects to external MCP servers to discover and invoke third-party tools:
+
+* **Configuration:** Defined in `config/mcp_servers.json`.
+* **Transports Supported:** `stdio` (local subprocesses) and `streamable_http` (remote HTTP endpoints).
+* **Canonical Namespacing:** `mcp.<server_id>.<tool_name>`.
+* **Guild Scoping:** Servers can restrict tools to designated Discord guild IDs (`allowed_guild_ids`).
+* **Failure Isolation:** If an external MCP server disconnects, normal bot operations and other tools are unaffected.
+* **Zero Overhead When Disabled:** Set `MCP_ENABLED=false` to consume zero memory or network resources.
+
+```
+/mcp status -> Check connectivity, latency, and tool counts for configured MCP servers
+/mcp tools  -> List all MCP tools currently registered and available in the server
+```
+
+---
+
+## 📊 10. Observability, Cost Tracking & VPS Protection
+
+* **Token Tracking:** Automatically extracts input and output tokens for every turn.
+* **Estimated Cost Calculation:** Records USD cost per request in `request_logs`.
+* **VPS Protection Semaphores:**
+  * Sandbox concurrency capped by `SANDBOX_MAX_CONCURRENCY=1`.
+  * Web fetch concurrency capped by `WEB_FETCH_CONCURRENCY=3`.
+  * MCP calls capped by `MCP_MAX_CONCURRENCY=4`.
+* **Provider Circuit Breakers:** Protects against cascading failures when upstream APIs experience outages.
+* **Admin Audit Dashboard (`/admin metrics`):** Live dashboard showing request counts, total tokens, average latency, and estimated cost.
+
+---
+
+## 🔒 11. Security Hardening & Secret Scrubbing
+
+Zauq v4 includes comprehensive production security controls:
+
+* **Secret Scrubbing Engine (`sanitize_secrets`):** API keys (`SERPER_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `QWEN_API_KEY`, `DEEPSEEK_API_KEY`, `DO_MODEL_ACCESS_KEY`, `SUPABASE_KEY`, `INTERNAL_API_KEY`) and standard token patterns (`Bearer ...`, `AIzaSy...`, `sk-ant-...`, `ghp_...`, Supabase JWTs) are scrubbed and replaced with `[REDACTED_SECRET]` before reaching model context or Discord replies.
+* **Prompt Injection Defense:** Strict system instructions and untrusted data fencing ensure the model never executes instructions embedded in retrieved webpages or documents.
+* **SSRF Defense:** Authoritative IP validation blocking private subnets, cloud metadata (`169.254.169.254`), and IPv4-mapped IPv6 across `web.fetch` and redirect chains.
+
+---
+
+## 📋 12. Complete Slash Command Catalog (31 Commands)
+
+### 🤖 Agent & Subsystems
+* `/agent status` — Inspect agent runtime flags, budgets, and subsystem health.
+* `/agent tools` — Discover active tools, risk levels, and guild scoping.
+* `/search` — Live web search with Serper & Research v2 evidence synthesis.
+* `/run` — Execute Python, JavaScript, or Bash code in isolated Docker sandbox.
+* `/mcp status` — Check connection health for external MCP servers.
+* `/mcp tools` — List external MCP tools available in this guild.
+
+### 🧠 Model & Reasoning
+* `/model status` — View active AI tier, provider, model name, and inheritance scope.
+* `/model set` — Configure provider and model for channel or server.
+* `/model reset` — Reset channel override to community server default.
+* `/thinking` — Toggle extended reasoning mode on or off.
+* `/info` — View complete technical engine specifications and limits.
+
+### 🎭 Operating Mode & Persona
+* `/mode` — Set operating mode (`dev` or `hangout`) for channel or server.
+* `/mode_reset` — Revert channel operating mode to community server default.
+
+### 🎙️ Media & Generation
+* `/say` — Convert text to speech using Microsoft Edge Neural TTS (19 voices).
+* `/imagine` — Generate photorealistic images via Google Gemini.
+* `/meme` — Render custom humorous memes with custom top and bottom captions.
+
+### 🎮 Mini-Games & Community
+* `/trivia` — Play interactive multi-category trivia games with timed buttons.
+* `/tictactoe` — Challenge a friend or AI to Tic-Tac-Toe.
+* `/rps` — Play Rock, Paper, Scissors against Zauq.
+* `/coinflip` — Flip a coin with realistic random outcomes.
+* `/roll` — Roll tabletop dice (e.g. 1d6, 2d20).
+* `/joke` — Get a programming or general joke.
+
+### 📈 Gamification & Utility
+* `/profile` — View personal user stats, XP, level, and command counters.
+* `/leaderboard` — Display the server-wide XP and reputation leaderboard.
+* `/remind` — Schedule delayed reminder notifications.
+* `/export` — Export conversation history as a formatted Markdown or JSON transcript.
+
+### 🛡️ Administration & Privacy
+* `/admin set_role` — Designate custom upper-role for bot management.
+* `/admin config` — View server administration settings and roles.
+* `/admin metrics` — View live API usage, token counts, and cost dashboard.
+* `/admin purge_user_data` — Right to be forgotten (purge user memories from database).
+* `/help` — Interactive help menu with category filters.
+
+---
+
+*Architected and maintained by Syed Muhammad Hassan / AgenticEra Systems — Zauq v4.0.0 Master Documentation*

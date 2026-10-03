@@ -279,3 +279,27 @@ CREATE INDEX IF NOT EXISTS idx_pending_actions_expires_at ON pending_actions (ex
 ALTER TABLE pending_actions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Service role only on pending_actions" ON pending_actions FOR ALL TO authenticated USING (false);
 CREATE POLICY "Block anon on pending_actions" ON pending_actions FOR ALL TO anon USING (false);
+
+-- ========================================================
+-- v4.0 Additive Migrations for Existing Databases (Phase 14)
+-- Safe to re-run on production deployments without data loss.
+-- ========================================================
+
+-- M5: Auto code test mode toggle per channel (Phase 5)
+ALTER TABLE channel_profiles
+    ADD COLUMN IF NOT EXISTS auto_code_test_mode TEXT NOT NULL DEFAULT 'off' CHECK (auto_code_test_mode IN ('off', 'auto', 'always'));
+
+-- M6: Observability, token usage, cost audit, and agent metrics (Phase 11)
+ALTER TABLE request_logs
+    ADD COLUMN IF NOT EXISTS tool_steps INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS search_calls INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS pages_fetched INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS sandbox_calls INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS mcp_calls INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS tool_failures INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS agent_duration_ms INT,
+    ADD COLUMN IF NOT EXISTS input_tokens INT,
+    ADD COLUMN IF NOT EXISTS output_tokens INT,
+    ADD COLUMN IF NOT EXISTS estimated_cost_usd DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS request_id TEXT,
+    ADD COLUMN IF NOT EXISTS agent_run_id TEXT;
