@@ -385,3 +385,13 @@ class DatabaseHelper:
             return 0
 
 db_helper = DatabaseHelper()
+
+
+def is_supabase_connected() -> bool:
+    """Return True if Supabase client is initialized and credentials are configured."""
+    return db_helper.supabase is not None
+
+
+def get_supabase_client() -> Optional[Client]:
+    """Return the active Supabase client instance if available."""
+    return db_helper.supabase

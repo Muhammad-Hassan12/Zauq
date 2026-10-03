@@ -48,6 +48,8 @@ class ToolPolicy:
         spec: ToolSpec,
         *,
         allow_code_exec: bool = False,
+        guild_id: str | None = None,
+        is_approved: bool = False,
     ) -> PolicyDecision:
         """
         Return the policy decision for this tool call.
@@ -56,19 +58,33 @@ class ToolPolicy:
             spec:            The ToolSpec to evaluate.
             allow_code_exec: Channel-level permission for code execution.
                              Only relevant for "code.execute".
+            guild_id:        Discord guild ID of the requesting context.
+            is_approved:     Whether human approval has already been granted.
         """
         # Disabled tool — never run
         if not spec.enabled:
             logger.warning(f"Policy DENY: tool '{spec.name}' is disabled")
             return PolicyDecision.DENY
 
-        # Blocked risk levels
-        if spec.risk in self._BLOCKED:
-            logger.warning(
-                f"Policy DENY: tool '{spec.name}' risk='{spec.risk}' "
-                "(write/destructive blocked until Phase 7 approval flow)"
+        # Guild access scope check (e.g. MCP tools restricted to specific guilds)
+        if spec.allowed_guild_ids:
+            if not guild_id or guild_id not in spec.allowed_guild_ids:
+                logger.warning(
+                    f"Policy DENY: tool '{spec.name}' is scoped to guilds {spec.allowed_guild_ids}, "
+                    f"current guild is '{guild_id}'"
+                )
+                return PolicyDecision.DENY
+
+        # Phase 7: Side-effect confirmation flow for write and destructive tools
+        if spec.risk in ("write", "destructive"):
+            if is_approved:
+                logger.info(f"Policy ALLOW: tool '{spec.name}' (risk={spec.risk}) explicitly approved by user.")
+                return PolicyDecision.ALLOW
+            logger.info(
+                f"Policy REQUIRE_CONFIRMATION: tool '{spec.name}' risk='{spec.risk}' "
+                "staged for human approval."
             )
-            return PolicyDecision.DENY
+            return PolicyDecision.REQUIRE_CONFIRMATION
 
         # Privileged: must be in allowlist and pass any per-tool checks
         if spec.risk == "privileged":

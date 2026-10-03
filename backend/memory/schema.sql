@@ -255,3 +255,27 @@ CREATE INDEX IF NOT EXISTS idx_user_memories_importance
 
 CREATE INDEX IF NOT EXISTS idx_user_memories_last_accessed
     ON user_memories(last_accessed_at ASC);
+
+-- ========================================================
+-- v4.0 Phase 7: Pending Actions (Human-in-the-Loop)
+-- ========================================================
+CREATE TABLE IF NOT EXISTS pending_actions (
+    action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    guild_id TEXT,
+    channel_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    arguments JSONB NOT NULL DEFAULT '{}'::jsonb,
+    risk TEXT NOT NULL DEFAULT 'write',
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'denied' | 'expired' | 'executed'
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    executed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_expires_at ON pending_actions (expires_at);
+
+ALTER TABLE pending_actions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Service role only on pending_actions" ON pending_actions FOR ALL TO authenticated USING (false);
+CREATE POLICY "Block anon on pending_actions" ON pending_actions FOR ALL TO anon USING (false);

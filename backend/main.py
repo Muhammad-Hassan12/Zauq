@@ -21,7 +21,19 @@ async def lifespan(app: FastAPI):
     """Startup: launch background workers. Shutdown: cancel them cleanly."""
     cleanup_task = asyncio.create_task(temp_file_manager.cleanup_loop())
     memory_decay_task = asyncio.create_task(start_memory_decay_worker())
+
+    # ── v4 Phase 6: MCP Client Lifecycle ──────────────────────────────────────
+    if settings.MCP_ENABLED:
+        from backend.mcp_client.manager import mcp_manager
+        await mcp_manager.start()
+
     yield
+
+    # Clean up MCP connections
+    if settings.MCP_ENABLED:
+        from backend.mcp_client.manager import mcp_manager
+        await mcp_manager.stop()
+
     cleanup_task.cancel()
     memory_decay_task.cancel()
     for task in [cleanup_task, memory_decay_task]:
@@ -42,6 +54,8 @@ app = FastAPI(
 app.add_middleware(RateLimitMiddleware, guild_limit=30, user_limit=10)
 app.add_middleware(AuthMiddleware)
 
+from backend.mcp_client.health import router as mcp_router
+
 app.include_router(chat.router)
 app.include_router(model.router)
 app.include_router(sandbox.router)
@@ -54,6 +68,13 @@ app.include_router(context.router)
 app.include_router(xp_router.router)
 app.include_router(reminders.router)
 app.include_router(moderation.router)
+app.include_router(mcp_router)
+
+from backend.routers.actions import router as actions_router
+app.include_router(actions_router)
+
+from backend.routers.agent import router as agent_router
+app.include_router(agent_router)
 
 
 @app.get("/health")

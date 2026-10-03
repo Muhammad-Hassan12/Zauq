@@ -22,6 +22,9 @@ class ToolSpec:
     risk: RiskLevel = "read"
     timeout_seconds: float = 15.0
     enabled: bool = True
+    server_id: str | None = None
+    original_tool_name: str | None = None
+    allowed_guild_ids: list[str] | None = None
     # Internal: not compared or repr'd; populated only during registration
     _handler: Callable[[dict], Awaitable[Any]] | None = field(
         default=None, repr=False, compare=False

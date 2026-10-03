@@ -36,6 +36,8 @@ class ToolExecutor:
         arguments: dict,
         *,
         allow_code_exec: bool = False,
+        guild_id: str | None = None,
+        is_approved: bool = False,
     ) -> ToolResult:
         """
         Execute a tool by canonical name or provider alias.
@@ -44,6 +46,8 @@ class ToolExecutor:
             tool_name:       Canonical name ("web.search") or alias ("web__search").
             arguments:       Validated argument dict for the tool handler.
             allow_code_exec: Channel-level flag forwarded to policy for code.execute.
+            guild_id:        Discord guild ID forwarded to policy for scope checking.
+            is_approved:     Whether human approval has already been granted.
 
         Returns:
             ToolResult with success=True on success, success=False on any failure.
@@ -61,7 +65,12 @@ class ToolExecutor:
             )
 
         # ── Step 2: Policy check ─────────────────────────────────────────────
-        decision = self._policy.evaluate(spec, allow_code_exec=allow_code_exec)
+        decision = self._policy.evaluate(
+            spec,
+            allow_code_exec=allow_code_exec,
+            guild_id=guild_id,
+            is_approved=is_approved,
+        )
         elapsed = int((time.monotonic() - start) * 1000)
 
         if decision == PolicyDecision.DENY:

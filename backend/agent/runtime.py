@@ -37,14 +37,20 @@ class ToolTraceItem:
     success: bool
     duration_ms: int
     error: Optional[str] = None
+    requires_confirmation: bool = False
+    action_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "tool": self.tool,
             "success": self.success,
             "duration_ms": self.duration_ms,
             "error": self.error,
         }
+        if self.requires_confirmation:
+            d["requires_confirmation"] = True
+            d["action_id"] = self.action_id
+        return d
 
 
 @dataclass
@@ -226,11 +232,14 @@ class AgentRuntime:
                 call_signatures_seen.add(call_sig)
 
                 # ── Tool Execution ───────────────────────────────────────────
-                tool_res = await self.executor.execute(
-                    tool_name=call.name,
-                    arguments=call.arguments,
-                    allow_code_exec=allow_code_exec,
-                )
+                exec_kwargs = {
+                    "tool_name": call.name,
+                    "arguments": call.arguments,
+                    "allow_code_exec": allow_code_exec,
+                }
+                if guild_id is not None:
+                    exec_kwargs["guild_id"] = guild_id
+                tool_res = await self.executor.execute(**exec_kwargs)
 
                 budget.tool_steps_used += 1
                 if call.name == "web.search":
@@ -240,20 +249,47 @@ class AgentRuntime:
                 elif call.name == "code.execute":
                     budget.sandbox_calls_used += 1
 
+                pending_action_id = None
+                requires_conf = bool(tool_res.metadata.get("requires_confirmation"))
+
+                if requires_conf:
+                    try:
+                        from backend.actions.service import action_service
+                        spec_obj = self.registry.get(call.name) if hasattr(self, "registry") else None
+                        action_risk = getattr(spec_obj, "risk", "write") if spec_obj else "write"
+                        act = await action_service.create_action(
+                            channel_id=channel_id or "unknown",
+                            user_id=user_id or "unknown",
+                            tool_name=call.name,
+                            arguments=call.arguments,
+                            guild_id=guild_id,
+                            risk=action_risk,
+                        )
+                        pending_action_id = act.action_id
+                        obs_content = (
+                            f"[Human Confirmation Required: Action ID '{act.action_id}'. "
+                            f"Tool '{call.name}' has side-effects (risk='{action_risk}') and has been staged. "
+                            "Do not retry calling this tool. "
+                            "Explain what action was prepared and ask the user to approve or deny using the confirmation buttons.]"
+                        )
+                    except Exception as act_err:
+                        logger.warning(f"Failed to create pending action: {act_err}")
+                        obs_content = f"Tool '{call.name}' requires confirmation, but failed to create action ticket: {act_err}"
+                elif tool_res.success:
+                    obs_content = tool_res.as_text()
+                else:
+                    obs_content = f"Tool '{call.name}' failed: {tool_res.error}"
+
                 tool_traces.append(
                     ToolTraceItem(
                         tool=call.name,
                         success=tool_res.success,
                         duration_ms=tool_res.duration_ms,
                         error=tool_res.error,
+                        requires_confirmation=requires_conf,
+                        action_id=pending_action_id,
                     ).to_dict()
                 )
-
-                # Formulate structured observation for model context
-                if tool_res.success:
-                    obs_content = tool_res.as_text()
-                else:
-                    obs_content = f"Tool '{call.name}' failed: {tool_res.error}"
 
                 # Enforce Phase 5 Repair Loop: max 1 repair attempt for code.execute
                 if call.name == "code.execute":

@@ -69,6 +69,7 @@ class ChatOrchestrator:
                 search_query=req.search_query,
                 allow_code_exec=ctx.allow_code_exec,
                 auto_code_test_mode=ctx.auto_code_test_mode,
+                guild_id=req.guild_id,
             )
 
             try:
@@ -112,6 +113,7 @@ class ChatOrchestrator:
                         search_query=req.search_query,
                         allow_code_exec=ctx.allow_code_exec,
                         auto_code_test_mode=ctx.auto_code_test_mode,
+                        guild_id=req.guild_id,
                     )
                     run_res = await self.agent_runtime.run(
                         messages=ctx.working_messages,

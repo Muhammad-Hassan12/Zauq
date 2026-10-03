@@ -53,7 +53,7 @@ class CapabilityRouter:
     """Routes requests to the minimal relevant tool subset deterministically."""
 
     def __init__(self, registry: Optional[ToolRegistry] = None) -> None:
-        self.registry = registry or tool_registry
+        self.registry = registry if registry is not None else tool_registry
 
     def has_urls(self, text: str) -> bool:
         """Check if text contains one or more HTTP/HTTPS URLs."""
@@ -86,6 +86,7 @@ class CapabilityRouter:
         search_query: Optional[str] = None,
         allow_code_exec: bool = False,
         auto_code_test_mode: str = "off",
+        guild_id: Optional[str] = None,
     ) -> List[ToolSpec]:
         """Select the minimal, relevant tool subset for this request.
 
@@ -98,6 +99,7 @@ class CapabilityRouter:
             search_query: Explicit search query string.
             allow_code_exec: Whether code execution is permitted by channel policy.
             auto_code_test_mode: 'off', 'auto', or 'always'.
+            guild_id: Requesting Discord guild ID (for scoping MCP tools).
 
         Returns:
             List of ToolSpec instances for tools the model is permitted to call.
@@ -143,17 +145,20 @@ class CapabilityRouter:
                 if "code.execute" in self.registry:
                     selected_names.add("code.execute")
 
-        # 6. Check for GitHub intent
+        # 6. Check for GitHub intent (MCP or native)
         if self.has_github_intent(user_text):
             for t in self.registry.list_tools(enabled_only=True):
-                if t.name.startswith("github."):
+                if t.name.startswith("github.") or t.name.startswith("mcp.github."):
                     selected_names.add(t.name)
 
-        # 7. Collect ToolSpec objects from registry
+        # 7. Collect ToolSpec objects from registry, enforcing guild scoping
         result: List[ToolSpec] = []
         for name in sorted(selected_names):
             spec = self.registry.get(name)
             if spec and spec.enabled:
+                if spec.allowed_guild_ids:
+                    if not guild_id or guild_id not in spec.allowed_guild_ids:
+                        continue
                 result.append(spec)
 
         logger.debug(

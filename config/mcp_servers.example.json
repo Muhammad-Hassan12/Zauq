@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Zauq v4 Model Context Protocol (MCP) Server Configuration Example",
+  "servers": [
+    {
+      "id": "github",
+      "enabled": false,
+      "transport": "streamable_http",
+      "url": "https://mcp.example.com/github",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}"
+      },
+      "allowed_guild_ids": [
+        "123456789012345678"
+      ],
+      "default_risk": "read",
+      "timeout_seconds": 15.0,
+      "namespace_prefix": "github",
+      "tool_risks": {
+        "create_issue": "write",
+        "delete_branch": "destructive"
+      }
+    },
+    {
+      "id": "local-docs",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "python",
+      "args": [
+        "servers/docs_server.py"
+      ],
+      "env": {
+        "DOCS_DIRECTORY": "${DOCS_DIRECTORY:-./docs}"
+      },
+      "allowed_guild_ids": [
+        "123456789012345678"
+      ],
+      "default_risk": "read",
+      "timeout_seconds": 15.0,
+      "namespace_prefix": "docs"
+    }
+  ]
+}

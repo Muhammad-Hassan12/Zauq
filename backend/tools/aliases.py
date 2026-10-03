@@ -72,6 +72,12 @@ class AliasMap:
             return self._a2c[name]
         raise KeyError(f"Unknown tool name or alias: '{name}'")
 
+    def unregister(self, canonical: str) -> None:
+        """Remove a canonical name and its alias mapping if present."""
+        if canonical in self._c2a:
+            alias = self._c2a.pop(canonical)
+            self._a2c.pop(alias, None)
+
     def all_aliases(self) -> dict[str, str]:
         """Return a copy of the canonical -> alias mapping."""
         return dict(self._c2a)

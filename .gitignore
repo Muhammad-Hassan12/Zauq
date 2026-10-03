@@ -8,6 +8,8 @@
 *.cert
 *secret*.json
 *credentials*.json
+config/mcp_servers.json
+!config/mcp_servers.example.json
 
 # Python
 __pycache__/

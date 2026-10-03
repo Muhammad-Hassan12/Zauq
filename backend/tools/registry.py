@@ -49,6 +49,36 @@ class ToolRegistry:
         self.aliases.register(spec.name)
         logger.debug(f"Registered tool: '{spec.name}' (risk={spec.risk}, source={spec.source})")
 
+    def unregister(self, name: str) -> bool:
+        """
+        Unregister a tool by canonical name or alias.
+        Returns True if removed, False if not found.
+        """
+        try:
+            canonical = self.aliases.resolve(name)
+        except KeyError:
+            return False
+        self._specs.pop(canonical, None)
+        self._handlers.pop(canonical, None)
+        self.aliases.unregister(canonical)
+        logger.debug(f"Unregistered tool: '{canonical}'")
+        return True
+
+    def unregister_by_server(self, server_id: str) -> list[str]:
+        """
+        Unregister all tools belonging to a given server_id.
+        Returns a list of unregistered canonical tool names.
+        """
+        removed = []
+        to_remove = [
+            canonical for canonical, spec in self._specs.items()
+            if spec.server_id == server_id
+        ]
+        for canonical in to_remove:
+            self.unregister(canonical)
+            removed.append(canonical)
+        return removed
+
     def get(self, name: str) -> ToolSpec | None:
         """
         Look up a ToolSpec by canonical name or provider alias.

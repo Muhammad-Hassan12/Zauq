@@ -181,7 +181,9 @@ async def on_ready():
             "bot.commands.search_slash",
             "bot.commands.file_slash",
             "bot.commands.info_slash",
-            "bot.commands.thinking_slash"
+            "bot.commands.thinking_slash",
+            "bot.commands.mcp_slash",
+            "bot.commands.agent_slash"
         ]
         for cog in cogs:
             try:
@@ -509,6 +511,14 @@ async def on_message(message: discord.Message):
                 except Exception as tts_err:
                     logger.info(f"Voice reply synthesis skipped: {tts_err}")
 
+            # Phase 8: Response Transparency — compact footer of tools used
+            tool_trace = res_data.get("tool_trace", [])
+            if tool_trace:
+                tools_used = [t.get("tool") for t in tool_trace if t.get("tool")]
+                if tools_used:
+                    tool_chain = " → ".join(tools_used)
+                    full_response = (full_response or "") + f"\n\n🛠️ *Tools used: {tool_chain}*"
+
             chunks = split_message_chunks(full_response, max_length=1900)
 
             # Edit initial message with first chunk
@@ -525,6 +535,29 @@ async def on_message(message: discord.Message):
                 except Exception as upload_err:
                     logger.error(f"Failed to send Discord file attachments: {upload_err}")
                     await target_channel.send(content=f"⚠️ *File attachment upload failed: {upload_err}*")
+
+            # Phase 7 & 8: Render interactive approval buttons for staged side-effect actions
+            for trace_item in tool_trace:
+                if trace_item.get("requires_confirmation") and trace_item.get("action_id"):
+                    action_id = trace_item["action_id"]
+                    try:
+                        from bot.ui.action_view import ActionConfirmationView
+                        async with api_client(timeout=5.0) as act_client:
+                            act_res = await act_client.get(f"{BACKEND_URL}/api/actions/{action_id}")
+                            if act_res.status_code == 200:
+                                act_data = act_res.json()
+                                action_view = ActionConfirmationView(
+                                    action_id=action_id,
+                                    initiator_id=act_data.get("initiator_id") or str(message.author.id),
+                                    tool_name=act_data.get("tool_name") or trace_item.get("tool", "unknown"),
+                                    arguments=act_data.get("arguments", {}),
+                                    risk=act_data.get("risk", "write"),
+                                )
+                                confirm_embed = action_view.build_preview_embed()
+                                confirm_msg = await target_channel.send(embed=confirm_embed, view=action_view)
+                                action_view.message = confirm_msg
+                    except Exception as act_ui_err:
+                        logger.warning(f"Could not render action confirmation view for {action_id}: {act_ui_err}")
 
             # Fallback notification — inform user when their configured provider failed
             # and Gemini Flash was substituted automatically
