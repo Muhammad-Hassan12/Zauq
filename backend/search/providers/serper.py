@@ -33,7 +33,7 @@ class SerperProvider:
     BASE_URL = "https://google.serper.dev"
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or settings.SERPER_API_KEY
+        self._api_key = api_key if api_key is not None else settings.SERPER_API_KEY
 
     @property
     def available(self) -> bool:

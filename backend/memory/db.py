@@ -68,10 +68,15 @@ class DatabaseHelper:
     async def upsert_channel_profile(
         self, channel_id: str, guild_id: str, operating_mode: str,
         system_persona_prompt: str = None, temperature: float = 0.7,
-        allow_code_exec: bool = False, thinking_enabled: bool = False
+        allow_code_exec: bool = False, thinking_enabled: bool = False,
+        auto_code_test_mode: str = "off"
     ) -> Dict[str, Any]:
         if not self.supabase:
-            return {"channel_id": channel_id, "operating_mode": operating_mode}
+            return {
+                "channel_id": channel_id,
+                "operating_mode": operating_mode,
+                "auto_code_test_mode": auto_code_test_mode
+            }
         # Ensure parent guild_config exists first
         if guild_id and guild_id != "dm":
             try:
@@ -87,7 +92,8 @@ class DatabaseHelper:
             "system_persona_prompt": system_persona_prompt,
             "temperature": temperature,
             "allow_code_exec": allow_code_exec,
-            "thinking_enabled": thinking_enabled
+            "thinking_enabled": thinking_enabled,
+            "auto_code_test_mode": auto_code_test_mode if auto_code_test_mode in ("off", "auto", "always") else "off",
         }
         res = await asyncio.to_thread(
             lambda: self.supabase.table("channel_profiles").upsert(payload).execute()
@@ -115,7 +121,41 @@ class DatabaseHelper:
             "system_persona_prompt": existing.get("system_persona_prompt"),
             "temperature": existing.get("temperature", 0.7),
             "allow_code_exec": existing.get("allow_code_exec", False),
-            "thinking_enabled": enabled
+            "thinking_enabled": enabled,
+            "auto_code_test_mode": existing.get("auto_code_test_mode", "off"),
+        }
+        res = await asyncio.to_thread(
+            lambda: self.supabase.table("channel_profiles").upsert(payload).execute()
+        )
+        return res.data[0] if res.data else payload
+
+    async def set_channel_auto_code_test_mode(self, channel_id: str, guild_id: str, mode: str) -> Dict[str, Any]:
+        """Set auto_code_test_mode ('off', 'auto', 'always') on a channel profile, preserving other settings."""
+        valid_mode = mode.lower().strip() if mode else "off"
+        if valid_mode not in ("off", "auto", "always"):
+            valid_mode = "off"
+
+        if not self.supabase:
+            return {"channel_id": channel_id, "auto_code_test_mode": valid_mode}
+
+        if guild_id and guild_id != "dm":
+            try:
+                await asyncio.to_thread(
+                    lambda: self.supabase.table("guild_configs").upsert({"guild_id": guild_id, "guild_name": f"Guild {guild_id}"}).execute()
+                )
+            except Exception:
+                pass
+
+        existing = await self.get_channel_profile(channel_id) or {}
+        payload = {
+            "channel_id": channel_id,
+            "guild_id": existing.get("guild_id", guild_id or "dm"),
+            "operating_mode": existing.get("operating_mode", "hangout"),
+            "system_persona_prompt": existing.get("system_persona_prompt"),
+            "temperature": existing.get("temperature", 0.7),
+            "allow_code_exec": existing.get("allow_code_exec", False),
+            "thinking_enabled": existing.get("thinking_enabled", False),
+            "auto_code_test_mode": valid_mode,
         }
         res = await asyncio.to_thread(
             lambda: self.supabase.table("channel_profiles").upsert(payload).execute()

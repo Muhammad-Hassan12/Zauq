@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS channel_profiles (
     system_persona_prompt TEXT,
     temperature DOUBLE PRECISION NOT NULL DEFAULT 0.7,
     allow_code_exec BOOLEAN NOT NULL DEFAULT FALSE,
+    auto_code_test_mode TEXT NOT NULL DEFAULT 'off' CHECK (auto_code_test_mode IN ('off', 'auto', 'always')),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

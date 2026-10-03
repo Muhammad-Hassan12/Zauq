@@ -26,7 +26,7 @@ class QwenClient:
         api_key: Optional[str] = None,
         default_model: Optional[str] = None,
     ):
-        raw_url = base_url or getattr(settings, "QWEN_BASE_URL", "")
+        raw_url = base_url if base_url is not None else getattr(settings, "QWEN_BASE_URL", "")
         self.base_url = raw_url.rstrip("/") if raw_url else ""
         self.api_key = api_key if api_key is not None else getattr(settings, "QWEN_API_KEY", "")
         self.default_model = default_model or getattr(settings, "QWEN_DEFAULT_MODEL", "qwen-turbo") or "qwen-turbo"

@@ -1,15 +1,53 @@
-import sys
+"""Hardened Code Execution Sandbox for Zauq v4.
+
+Features:
+- Global concurrency semaphore (SANDBOX_MAX_CONCURRENCY)
+- Strict output truncation (SANDBOX_MAX_OUTPUT_CHARS)
+- Unique execution ID & container naming (zauq_exec_<id>)
+- Explicit container cleanup on timeout via 'docker rm -f'
+- Security flags: --cap-drop ALL, --security-opt no-new-privileges, --network none,
+  --memory 256m, --cpus 0.5, --pids-limit 50, --read-only, --user 65534:65534
+- Image allowlist (python:3.11-slim, node:18-alpine, alpine:latest)
+- Logging without code content exposure
+"""
+
 import os
 import shutil
 import asyncio
 import tempfile
 import time
-from typing import Dict, Any
+import uuid
+import logging
+from typing import Dict, Any, Optional
+
+from backend.config import settings
+
+logger = logging.getLogger("zauq.sandbox")
 
 _MAX_CODE_LENGTH = 50_000  # 50KB max code size
 
+_ALLOWED_IMAGES = {
+    "python": ("python:3.11-slim", "py", ["python3", "/sandbox/code.py"]),
+    "javascript": ("node:18-alpine", "js", ["node", "/sandbox/code.js"]),
+    "node": ("node:18-alpine", "js", ["node", "/sandbox/code.js"]),
+    "js": ("node:18-alpine", "js", ["node", "/sandbox/code.js"]),
+    "bash": ("alpine:latest", "sh", ["sh", "/sandbox/code.sh"]),
+    "sh": ("alpine:latest", "sh", ["sh", "/sandbox/code.sh"]),
+}
+
+# Global concurrency lock across all requests on this host
+_sandbox_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _sandbox_semaphore
+    if _sandbox_semaphore is None:
+        _sandbox_semaphore = asyncio.Semaphore(max(1, settings.SANDBOX_MAX_CONCURRENCY))
+    return _sandbox_semaphore
+
 
 async def is_docker_available() -> bool:
+    """Checks if Docker daemon is running and reachable."""
     docker_path = shutil.which("docker")
     if not docker_path:
         return False
@@ -17,134 +55,223 @@ async def is_docker_available() -> bool:
         proc = await asyncio.create_subprocess_exec(
             "docker", "ps",
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        await asyncio.wait_for(proc.wait(), timeout=10.0)
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
         return proc.returncode == 0
     except Exception:
         return False
 
 
-async def execute_code_docker(code: str, language: str = "python", timeout: float = 5.0) -> Dict[str, Any]:
+def _truncate_output(text: str, max_chars: int) -> tuple[str, bool]:
+    """Truncate output if it exceeds max_chars."""
+    if len(text) <= max_chars:
+        return text, False
+    trunc_msg = f"\n... [Output truncated at {max_chars:,} characters]"
+    return text[:max_chars] + trunc_msg, True
+
+
+async def _cleanup_container(container_name: str) -> None:
+    """Forcefully remove a container if it is still running."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "rm", "-f", container_name,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    except Exception as e:
+        logger.warning(f"Failed to cleanup container {container_name}: {e}")
+
+
+async def execute_code_docker(
+    code: str,
+    language: str = "python",
+    timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Execute code in a hardened Docker container under concurrency controls."""
+    effective_timeout = timeout if timeout is not None else float(settings.SANDBOX_DEFAULT_TIMEOUT_SECONDS)
+    exec_id = f"zauq_exec_{uuid.uuid4().hex[:12]}"
+    max_output = settings.SANDBOX_MAX_OUTPUT_CHARS
+
     # Enforce code size limit
     if len(code) > _MAX_CODE_LENGTH:
         return {
+            "execution_id": exec_id,
             "success": False,
             "stdout": "",
             "stderr": f"Code too large. Maximum allowed size is {_MAX_CODE_LENGTH:,} characters.",
             "exit_code": 1,
-            "execution_time_ms": 0
+            "execution_time_ms": 0,
+            "timed_out": False,
+            "truncated": False,
         }
 
-    lang_map = {
-        "python": ("python:3.11-slim", "py"),
-        "javascript": ("node:18-alpine", "js"),
-        "node": ("node:18-alpine", "js"),
-        "js": ("node:18-alpine", "js"),
-        "bash": ("alpine:latest", "sh"),
-        "sh": ("alpine:latest", "sh")
-    }
-
-    lang = language.lower()
-    if lang not in lang_map:
+    lang = language.lower().strip()
+    if lang not in _ALLOWED_IMAGES:
         return {
+            "execution_id": exec_id,
             "success": False,
             "stdout": "",
             "stderr": f"Unsupported language '{language}'. Supported: python, javascript, bash",
             "exit_code": 1,
-            "execution_time_ms": 0
+            "execution_time_ms": 0,
+            "timed_out": False,
+            "truncated": False,
         }
 
-    image, ext = lang_map[lang]
+    image, ext, container_cmd = _ALLOWED_IMAGES[lang]
 
-    # Write code to a temp file and mount it read-only — avoids shell metacharacter injection via -c flag
-    tmp_dir = tempfile.mkdtemp(prefix="zauq_sandbox_")
-    code_file = os.path.join(tmp_dir, f"code.{ext}")
-    try:
-        with open(code_file, "w", encoding="utf-8") as f:
-            f.write(code)
-
-        # Build the interpreter command based on language
-        if lang in ("python",):
-            container_cmd = ["python3", "/sandbox/code.py"]
-        elif lang in ("javascript", "node", "js"):
-            container_cmd = ["node", "/sandbox/code.js"]
-        else:
-            container_cmd = ["sh", "/sandbox/code.sh"]
-
-        docker_cmd = [
-            "docker", "run", "--rm",
-            "--network", "none",
-            "--memory", "256m",
-            "--cpus", "0.5",
-            "--pids-limit", "50",
-            "--read-only",
-            "--user", "65534:65534",
-            "--security-opt", "no-new-privileges",
-            "--tmpfs", "/tmp:size=10m,noexec",
-            "-v", f"{code_file}:/sandbox/code.{ext}:ro",
-            image
-        ] + container_cmd
-
-        start_time = time.time()
-        proc = await asyncio.create_subprocess_exec(
-            *docker_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+    # Acquire concurrency semaphore
+    semaphore = _get_semaphore()
+    async with semaphore:
+        tmp_dir = tempfile.mkdtemp(prefix="zauq_sandbox_")
+        code_file = os.path.join(tmp_dir, f"code.{ext}")
 
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            duration_ms = int((time.time() - start_time) * 1000)
+            with open(code_file, "w", encoding="utf-8") as f:
+                f.write(code)
 
-            return {
-                "success": proc.returncode == 0,
-                "stdout": stdout.decode("utf-8", errors="replace"),
-                "stderr": stderr.decode("utf-8", errors="replace"),
-                "exit_code": proc.returncode,
-                "execution_time_ms": duration_ms
-            }
+            docker_cmd = [
+                "docker", "run", "--rm",
+                "--name", exec_id,
+                "--network", "none",
+                "--memory", "256m",
+                "--cpus", "0.5",
+                "--pids-limit", "50",
+                "--read-only",
+                "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges",
+                "--user", "65534:65534",
+                "--tmpfs", "/tmp:size=10m,noexec",
+                "-v", f"{code_file}:/sandbox/code.{ext}:ro",
+                image,
+            ] + container_cmd
 
-        except asyncio.TimeoutError:
-            # Explicitly kill the subprocess to avoid zombie containers
+            start_time = time.time()
+            proc = await asyncio.create_subprocess_exec(
+                *docker_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
             try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
+                raw_stdout, raw_stderr = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=effective_timeout,
+                )
+                duration_ms = int((time.time() - start_time) * 1000)
+
+                stdout_decoded = raw_stdout.decode("utf-8", errors="replace")
+                stderr_decoded = raw_stderr.decode("utf-8", errors="replace")
+
+                stdout_clean, trunc_out = _truncate_output(stdout_decoded, max_output)
+                stderr_clean, trunc_err = _truncate_output(stderr_decoded, max_output)
+
+                success = proc.returncode == 0
+                logger.info(
+                    f"Sandbox exec={exec_id} lang={lang} duration_ms={duration_ms} "
+                    f"exit_code={proc.returncode} success={success}"
+                )
+
+                return {
+                    "execution_id": exec_id,
+                    "success": success,
+                    "stdout": stdout_clean,
+                    "stderr": stderr_clean,
+                    "exit_code": proc.returncode,
+                    "execution_time_ms": duration_ms,
+                    "timed_out": False,
+                    "truncated": trunc_out or trunc_err,
+                }
+
+            except asyncio.TimeoutError:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.warning(f"Sandbox exec={exec_id} timed out after {effective_timeout}s. Force cleaning container.")
+                try:
+                    res = proc.kill()
+                    if asyncio.iscoroutine(res):
+                        await res
+                    await proc.wait()
+                except Exception:
+                    pass
+
+                # Force cleanup container by name
+                await _cleanup_container(exec_id)
+
+                return {
+                    "execution_id": exec_id,
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"Execution timed out after {effective_timeout} seconds.",
+                    "exit_code": -1,
+                    "execution_time_ms": duration_ms,
+                    "timed_out": True,
+                    "truncated": False,
+                }
+
+        except Exception as e:
+            logger.error(f"Sandbox exec={exec_id} unexpected error: {e}")
+            await _cleanup_container(exec_id)
             return {
+                "execution_id": exec_id,
                 "success": False,
                 "stdout": "",
-                "stderr": f"Execution timed out after {timeout} seconds.",
-                "exit_code": -1,
-                "execution_time_ms": int(timeout * 1000)
+                "stderr": f"Docker execution error: {str(e)}",
+                "exit_code": 1,
+                "execution_time_ms": 0,
+                "timed_out": False,
+                "truncated": False,
             }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "stdout": "",
-            "stderr": f"Docker execution error: {str(e)}",
-            "exit_code": 1,
-            "execution_time_ms": 0
-        }
-    finally:
-        # Always clean up the temp directory
-        try:
-            import shutil as _shutil
-            _shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        finally:
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
 
 
-async def execute_code(code: str, language: str = "python", timeout: float = 5.0) -> Dict[str, Any]:
+async def execute_code(
+    code: str,
+    language: str = "python",
+    timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Top-level entrypoint for sandbox execution."""
     if await is_docker_available():
         return await execute_code_docker(code, language, timeout)
     else:
         return {
+            "execution_id": f"zauq_exec_{uuid.uuid4().hex[:12]}",
             "success": False,
             "stdout": "",
             "stderr": "Code execution failed: Docker sandbox is not available on the host system. For security, direct host execution is disabled.",
             "exit_code": 1,
-            "execution_time_ms": 0
+            "execution_time_ms": 0,
+            "timed_out": False,
+            "truncated": False,
         }
+
+
+async def get_sandbox_status() -> Dict[str, Any]:
+    """Returns sandbox health, limits, and runtime configuration."""
+    docker_up = await is_docker_available()
+    allowed_unique = sorted(list(set(img for img, _, _ in _ALLOWED_IMAGES.values())))
+    return {
+        "status": "ready" if docker_up else "docker_unavailable",
+        "docker_available": docker_up,
+        "max_concurrency": settings.SANDBOX_MAX_CONCURRENCY,
+        "default_timeout_seconds": settings.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
+        "max_output_chars": settings.SANDBOX_MAX_OUTPUT_CHARS,
+        "auto_code_test_default": settings.AUTO_CODE_TEST_DEFAULT,
+        "auto_code_repair_attempts": settings.AUTO_CODE_REPAIR_ATTEMPTS,
+        "allowed_images": allowed_unique,
+        "security": {
+            "network": "none",
+            "cap_drop": "ALL",
+            "no_new_privileges": True,
+            "read_only": True,
+            "memory": "256m",
+            "cpus": 0.5,
+            "pids_limit": 50,
+            "user": "65534:65534",
+        },
+    }

@@ -204,5 +204,64 @@ class ExecSlash(commands.Cog):
 
         await execute_and_send_result(interaction, code, lang, str(interaction.channel_id))
 
+    # ── v4 /sandbox Command Group ─────────────────────────────────────────────
+    sandbox_group = app_commands.Group(name="sandbox", description="Docker code sandbox status and automation settings")
+
+    @sandbox_group.command(name="status", description="View Docker sandbox health, concurrency limits, and security controls")
+    async def sandbox_status(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with api_client(timeout=10.0) as client:
+                res = await client.get(f"{BACKEND_URL}/api/sandbox/status")
+                if res.status_code != 200:
+                    await interaction.followup.send(f"⚠️ Error fetching sandbox status: {res.text}")
+                    return
+                data = res.json()
+                docker_ok = data.get("docker_available", False)
+                color = discord.Color.green() if docker_ok else discord.Color.gold()
+                embed = discord.Embed(title="⚙️ Zauq Code Sandbox Status", color=color)
+                embed.add_field(name="Docker Daemon", value="🟢 Online" if docker_ok else "🟡 Offline / Host Disabled", inline=True)
+                embed.add_field(name="Max Concurrency", value=str(data.get("max_concurrency", 1)), inline=True)
+                embed.add_field(name="Default Timeout", value=f"{data.get('default_timeout_seconds', 8)}s", inline=True)
+                embed.add_field(name="Max Output Chars", value=f"{data.get('max_output_chars', 12000):,}", inline=True)
+                embed.add_field(name="Auto-Test Default", value=str(data.get("auto_code_test_default", "off")), inline=True)
+                embed.add_field(name="Max Repair Attempts", value=str(data.get("auto_code_repair_attempts", 1)), inline=True)
+                images = ", ".join(f"`{img}`" for img in data.get("allowed_images", []))
+                embed.add_field(name="Allowed Containers", value=images or "None", inline=False)
+                sec = data.get("security", {})
+                embed.set_footer(text=f"Network: {sec.get('network')} • RAM: {sec.get('memory')} • CPUs: {sec.get('cpus')} • Cap-drop: {sec.get('cap_drop')}")
+                await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error querying sandbox status: {e}")
+
+    @sandbox_group.command(name="auto_mode", description="Configure automatic code testing for this channel (off, auto, always)")
+    @app_commands.describe(mode="Choose auto code test policy: off, auto, or always")
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="Off (Manual /run only)", value="off"),
+            app_commands.Choice(name="Auto (Test when helpful)", value="auto"),
+            app_commands.Choice(name="Always (Verify all runnable code)", value="always"),
+        ]
+    )
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def sandbox_auto_mode(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        await interaction.response.defer(thinking=True)
+        channel_id = str(interaction.channel_id)
+        guild_id = str(interaction.guild_id) if interaction.guild_id else "dm"
+        payload = {
+            "channel_id": channel_id,
+            "guild_id": guild_id,
+            "auto_mode": mode.value
+        }
+        try:
+            async with api_client(timeout=10.0) as client:
+                res = await client.post(f"{BACKEND_URL}/api/sandbox/auto_mode", json=payload)
+                if res.status_code != 200:
+                    await interaction.followup.send(f"⚠️ Error setting auto mode: {res.text}")
+                    return
+                await interaction.followup.send(f"✅ Sandbox auto-code-test mode set to **{mode.name}** for this channel.")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error updating sandbox auto mode: {e}")
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(ExecSlash(bot))

@@ -141,3 +141,10 @@ class ToolExecutor:
                 error=str(exc),
                 duration_ms=duration_ms,
             )
+
+
+from backend.tools.registry import tool_registry
+from backend.tools.policy import tool_policy
+
+# Module-level singleton
+tool_executor = ToolExecutor(registry=tool_registry, policy=tool_policy)
