@@ -99,11 +99,24 @@ class ModelRouter:
         if not last_query or len(last_query.strip()) < 3:
             return
 
-        search_data = await web_search_engine.deep_search_and_roam(
+        # Phase 9: Search Deduplication Guard — skip if web evidence was already injected upstream
+        evidence_markers = (
+            "[Live Deep Web Research Context",
+            "[Autonomous Deep Web Research Context",
+            "[Attached Live Webpage Content",
+            "[Full-Page Web Research Context",
+            "[Live Web Search Snippets",
+        )
+        if any(marker in last_query for marker in evidence_markers):
+            logger.debug("Web evidence already present in prompt. Skipping duplicate search.")
+            return
+
+        from backend.search.service import search_service
+        search_data = await search_service.search_and_fetch(
             query=last_query,
             max_results=5,
-            roam_top_n=2,
-            category=category
+            fetch_top_n=2,
+            category=category,
         )
 
         if search_data.get("context_text"):

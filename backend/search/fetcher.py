@@ -52,6 +52,20 @@ def is_safe_public_url(url: str) -> bool:
         if hostname.lower() in _BLOCKED_HOSTNAMES:
             return False
 
+        # Fast-path: direct IP check without DNS overhead
+        try:
+            direct_ip = ipaddress.ip_address(hostname)
+            return not (
+                direct_ip.is_private
+                or direct_ip.is_loopback
+                or direct_ip.is_link_local
+                or direct_ip.is_reserved
+                or direct_ip.is_multicast
+                or direct_ip.is_unspecified
+            )
+        except ValueError:
+            pass
+
         addr_info = socket.getaddrinfo(hostname, None)
         if not addr_info:
             return False

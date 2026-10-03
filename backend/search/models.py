@@ -62,3 +62,25 @@ class FetchResult:
 
     def __post_init__(self) -> None:
         self.char_count = len(self.content)
+
+
+@dataclass
+class EvidenceItem:
+    """Structured evidence excerpt extracted from a retrieved web source (Phase 10)."""
+    claim: str
+    source_url: str
+    source_title: str
+    excerpt: str
+
+
+@dataclass
+class ResearchResult:
+    """Structured output of a bounded deep research cycle (Phase 10)."""
+    topic: str
+    queries: list[str]
+    evidence: list[EvidenceItem] = field(default_factory=list)
+    citations: list[str] = field(default_factory=list)
+    context_text: str = ""
+    total_chars: int = 0
+    degraded: bool = False
+    from_cache: bool = False

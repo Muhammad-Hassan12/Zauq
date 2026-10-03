@@ -156,12 +156,12 @@ class GeminiClient:
                 "parts": [{"text": system_prompt}]
             }
 
-        # Native tool declarations or Google Search Grounding
+        # Native tool declarations or Google Search Grounding (Phase 9)
         if tools:
             gemini_tools = to_gemini_tools(tools)
             if gemini_tools:
                 payload["tools"] = gemini_tools
-        elif enable_search:
+        elif enable_search and getattr(settings, "GEMINI_NATIVE_GROUNDING_ENABLED", False):
             payload["tools"] = [{"googleSearch": {}}]
 
         return payload
@@ -334,4 +334,7 @@ class GeminiClient:
                 )
             except (KeyError, IndexError) as e:
                 raise RuntimeError(f"Unexpected response structure from Gemini API: {data} ({e})")
+
+
+gemini_client = GeminiClient()
 

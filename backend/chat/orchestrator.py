@@ -22,6 +22,7 @@ from backend.agent.capability_router import capability_router
 from backend.chat.context_builder import context_builder, ChatContext
 from backend.parsers.file_parser import extract_generated_files
 from backend.integrations.web_search import web_search_engine
+from backend.search.service import search_service
 from backend.memory.metrics import log_request_metric
 from backend.memory.episodic import extract_and_store_user_memories
 
@@ -168,18 +169,27 @@ class ChatOrchestrator:
                     if match:
                         raw_search_q = match.group(1)
 
-                search_data = await web_search_engine.deep_search_and_roam(
+                search_data = await search_service.search_and_fetch(
                     query=raw_search_q,
                     max_results=5,
-                    roam_top_n=3 if req.deep_search else 2,
+                    fetch_top_n=5 if req.deep_search else 2,
                     category=req.search_category or "all",
                 )
                 if search_data.get("context_text"):
                     target_user_msg["content"] += (
                         f"\n\n[Autonomous Deep Web Research Context & Live Sources]:\n"
                         f"{search_data['context_text']}\n\n"
-                        "Synthesize a well-structured, authoritative, and comprehensive answer strictly utilizing the live research sources provided above. Include relevant markdown citations."
+                        "Synthesize a well-structured, authoritative, and comprehensive answer strictly utilizing the live research sources provided above. Format citations as verified markdown links (e.g. • [Title](url))."
                     )
+                    tool_trace.append({
+                        "tool": "web.search",
+                        "success": True,
+                        "duration_ms": int((time.time() - start_time) * 1000),
+                    })
+                    tool_steps += 1
+
+            # Prevent secondary search in model_router if context was already enriched
+            pass_enable_search = False if tool_steps > 0 else ctx.enable_search
 
             try:
                 raw_response_text = await self.model_router.generate(
@@ -189,7 +199,7 @@ class ChatOrchestrator:
                     system_prompt=ctx.persona,
                     temperature=ctx.temperature,
                     media_parts=ctx.media_parts,
-                    enable_search=ctx.enable_search,
+                    enable_search=pass_enable_search,
                     thinking_enabled=ctx.thinking_enabled,
                 )
             except Exception as prov_err:
@@ -207,7 +217,7 @@ class ChatOrchestrator:
                         system_prompt=ctx.persona,
                         temperature=ctx.temperature,
                         media_parts=ctx.media_parts,
-                        enable_search=ctx.enable_search,
+                        enable_search=pass_enable_search,
                         thinking_enabled=ctx.thinking_enabled,
                     )
                 else:

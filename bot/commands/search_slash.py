@@ -83,7 +83,10 @@ class SearchSlash(commands.Cog):
                     description=response_text[:4000],
                     color=discord.Color.blue() if not deep else discord.Color.teal()
                 )
-                embed.set_footer(text=f"Zauq Web Intelligence • Category: {cat_val.upper()} • {provider} ({model})")
+                tool_trace = data.get("tool_trace", [])
+                tools_used = [t.get("tool") for t in tool_trace if t.get("tool")]
+                tools_suffix = f" • Tools: {' → '.join(tools_used)}" if tools_used else ""
+                embed.set_footer(text=f"Zauq Web Intelligence • Category: {cat_val.upper()}{tools_suffix} • {provider} ({model})")
                 await interaction.followup.send(embed=embed)
 
                 if len(response_text) > 4000:

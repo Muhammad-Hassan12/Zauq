@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     WEB_SEARCH_CACHE_TTL_SECONDS: int = 300
     WEB_SEARCH_MAX_RESULTS: int = 5
     WEB_FETCH_MAX_PAGES: int = 3
+    GEMINI_NATIVE_GROUNDING_ENABLED: bool = False
 
     # ── v4 MCP ────────────────────────────────────────────────────────────────
     MCP_ENABLED: bool = False

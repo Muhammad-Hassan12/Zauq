@@ -127,21 +127,26 @@ async def test_timeout_result_has_duration(rig: tuple) -> None:
 # ── Policy blocking ───────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_write_risk_is_denied(rig: tuple) -> None:
+async def test_write_risk_requires_confirmation(rig: tuple) -> None:
     reg, executor = rig
 
     async def handler(args: dict) -> str:
-        return "should not run"
+        return "ran"
 
     reg.register(make_spec("write.tool", risk="write"), handler)
     result = await executor.execute("write.tool", {})
 
     assert result.success is False
-    assert "denied by policy" in result.error
+    assert result.metadata.get("requires_confirmation") is True
+
+    # When approved, execution succeeds
+    approved_res = await executor.execute("write.tool", {}, is_approved=True)
+    assert approved_res.success is True
+    assert approved_res.content == "ran"
 
 
 @pytest.mark.asyncio
-async def test_destructive_risk_is_denied(rig: tuple) -> None:
+async def test_destructive_risk_requires_confirmation(rig: tuple) -> None:
     reg, executor = rig
 
     async def handler(args: dict) -> str:
@@ -151,7 +156,12 @@ async def test_destructive_risk_is_denied(rig: tuple) -> None:
     result = await executor.execute("destroy.everything", {})
 
     assert result.success is False
-    assert "denied by policy" in result.error
+    assert result.metadata.get("requires_confirmation") is True
+
+    # When approved, execution succeeds
+    approved_res = await executor.execute("destroy.everything", {}, is_approved=True)
+    assert approved_res.success is True
+    assert approved_res.content == "boom"
 
 
 @pytest.mark.asyncio

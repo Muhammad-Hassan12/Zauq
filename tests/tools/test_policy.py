@@ -32,17 +32,19 @@ def test_read_risk_is_allowed() -> None:
 
 # ── Risk: write ───────────────────────────────────────────────────────────────
 
-def test_write_risk_is_denied() -> None:
-    """write tools are blocked until the Phase 7 approval flow is built."""
+def test_write_risk_requires_confirmation() -> None:
+    """write tools require confirmation unless is_approved=True."""
     policy = ToolPolicy()
-    assert policy.evaluate(make_spec(risk="write")) == PolicyDecision.DENY
+    assert policy.evaluate(make_spec(risk="write"), is_approved=False) == PolicyDecision.REQUIRE_CONFIRMATION
+    assert policy.evaluate(make_spec(risk="write"), is_approved=True) == PolicyDecision.ALLOW
 
 
 # ── Risk: destructive ─────────────────────────────────────────────────────────
 
-def test_destructive_risk_is_denied() -> None:
+def test_destructive_risk_requires_confirmation() -> None:
     policy = ToolPolicy()
-    assert policy.evaluate(make_spec(risk="destructive")) == PolicyDecision.DENY
+    assert policy.evaluate(make_spec(risk="destructive"), is_approved=False) == PolicyDecision.REQUIRE_CONFIRMATION
+    assert policy.evaluate(make_spec(risk="destructive"), is_approved=True) == PolicyDecision.ALLOW
 
 
 # ── Risk: privileged — not in allowlist ───────────────────────────────────────
