@@ -4,7 +4,7 @@
 
 # Zauq (ذوق) v4
 
-A Discord AI assistant for conversation, research, coding and community tools.
+An MCP-powered agentic AI assistant for Discord with web research, coding tools, sandboxed execution, semantic memory, multi-provider LLM routing, and extensible tool use.
 
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](#quick-start)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](backend/main.py)
