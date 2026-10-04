@@ -43,7 +43,7 @@ async def _bounded_get(url: str, timeout: float) -> tuple[int, dict, str]:
         raise ValueError('Restricted destination')
     target = httpx.URL(url).copy_with(host=ips[0])
     headers = {'Host': parsed.netloc, 'User-Agent': _USER_AGENT, 'Accept-Encoding': 'identity'}
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False, verify=False) as client:
         async with client.stream('GET', target, headers=headers, extensions={'sni_hostname': parsed.hostname}) as response:
             if response.status_code != 200:
                 return response.status_code, dict(response.headers), ''
@@ -71,7 +71,7 @@ async def _fetch_via_jina(url: str, max_chars: int) -> str | None:
     """Try to fetch readable content via Jina Reader. Returns None on failure."""
     jina_url = f"{_JINA_BASE}{url}"
     try:
-        status, _, body = await _bounded_get(jina_url, 8.0)
+        status, _, body = await _bounded_get(jina_url, 3.5)
         if status == 200 and len(body.strip()) > 50:
             return body.strip()[:max_chars]
     except Exception as exc:
