@@ -54,6 +54,7 @@ async def get_pending_reminders():
                 .select("*")
                 .lte("remind_at", now_str)
                 .eq("delivered", False)
+                .eq("delivering", False)   # skip in-flight reminders to prevent duplicates
                 .limit(20)
                 .execute()
         )
@@ -62,15 +63,38 @@ async def get_pending_reminders():
         logger.error(f"Failed to fetch pending reminders: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch pending reminders.")
 
+@router.post("/mark_delivering")
+async def mark_reminder_delivering(reminder_id: str = Query(..., max_length=64), reset: bool = Query(False)):
+    """Mark a reminder as in-flight before attempting delivery.
+    Called by the bot before posting to Discord to prevent duplicate sends on restart.
+    Pass reset=true to roll back a failed delivery attempt so the reminder can be retried.
+    """
+    if not db_helper.supabase:
+        return {"status": "success"}
+
+    try:
+        delivering_value = not reset  # reset=True clears the flag; default sets it
+        res = await asyncio.to_thread(
+            lambda: db_helper.supabase.table("scheduled_reminders")
+                .update({"delivering": delivering_value})
+                .eq("reminder_id", reminder_id)
+                .eq("delivered", False)    # idempotent: only flip if not yet delivered
+                .execute()
+        )
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        logger.error(f"Failed to mark reminder as delivering: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update reminder status.")
+
 @router.post("/mark_delivered")
-async def mark_reminder_delivered(reminder_id: str = Query(...)):
+async def mark_reminder_delivered(reminder_id: str = Query(..., max_length=64)):
     if not db_helper.supabase:
         return {"status": "success"}
 
     try:
         res = await asyncio.to_thread(
             lambda: db_helper.supabase.table("scheduled_reminders")
-                .update({"delivered": True})
+                .update({"delivered": True, "delivering": False})
                 .eq("reminder_id", reminder_id)
                 .execute()
         )

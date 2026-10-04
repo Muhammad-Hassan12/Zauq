@@ -33,10 +33,10 @@ class XPManager:
 
             delta = (today - last_date).days
             if delta == 0:
-                # Same day — don't change streak
+                # Same day... don't change streak
                 return current_streak
             elif delta == 1:
-                # Consecutive day — increment streak
+                # Consecutive day... increment streak
                 return current_streak + 1
             else:
                 # Streak broken

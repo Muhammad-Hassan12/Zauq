@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 from typing import Optional
 from backend.memory.db import db_helper
 from backend.models.router import model_router
+from backend.config import settings
+from backend.version import ZAUQ_VERSION
 
 from backend.models.catalog import (
     normalize_provider_id,
@@ -23,7 +25,7 @@ class ModelSetRequest(BaseModel):
     scope: Optional[str] = "channel"  # 'channel' or 'server'
     tier: int
     provider: str
-    model_name: Optional[str] = None
+    model_name: Optional[str] = Field(None, min_length=1, max_length=200, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]*$')
     updated_by: Optional[str] = ""
 
 def normalize_provider(raw_provider: str) -> str:
@@ -45,7 +47,7 @@ async def get_provider_catalog(provider: str):
     return {"provider": normalize_provider_id(provider), "models": models}
 
 @router.get("/status")
-async def get_model_status(channel_id: str, guild_id: Optional[str] = None):
+async def get_model_status(channel_id: str = Query(..., max_length=30), guild_id: Optional[str] = Query(None, max_length=30)):
     # 1. Check Channel Override
     selection = await db_helper.get_model_selection(channel_id)
     if selection:
@@ -93,22 +95,8 @@ async def get_model_status(channel_id: str, guild_id: Optional[str] = None):
 @router.get("/gemini-models")
 async def list_gemini_models():
     """Returns available models from Google AI Studio (Gemini & Gemma families)."""
-    return {
-        "gemini": [
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3-pro-preview",
-            "gemini-3-flash-preview",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite"
-        ],
-        "gemma": [
-            "gemma-4-26b-a4b-it",
-            "gemma-4-31b-it"
-        ]
-    }
+    models = get_models_for_provider('gemini')
+    return {'gemini':[m for m in models if not m.startswith('gemma')], 'gemma':[m for m in models if m.startswith('gemma')]}
 
 @router.get("/do-models")
 async def list_do_models():
@@ -191,7 +179,7 @@ async def set_model_selection(req: ModelSetRequest):
         }
 
 @router.post("/reset")
-async def reset_model_selection(channel_id: str):
+async def reset_model_selection(channel_id: str = Query(..., max_length=30)):
     """Deletes a channel model override so it inherits the community server default."""
     success = await db_helper.delete_model_selection(channel_id)
     return {
@@ -202,7 +190,7 @@ async def reset_model_selection(channel_id: str):
     }
 
 @router.get("/info")
-async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
+async def get_full_system_info(channel_id: str = Query(..., max_length=30), guild_id: Optional[str] = Query(None, max_length=30)):
     """
     Returns complete live specifications, active model tier, mode, and capabilities.
     """
@@ -218,23 +206,23 @@ async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
     thinking_enabled = bool(channel_profile.get("thinking_enabled", False)) if channel_profile else False
     if channel_profile:
         mode = channel_profile.get("operating_mode", "hangout")
-        temp = float(channel_profile.get("temperature", 0.2 if mode == "dev" else 0.75))
+        temp = float(channel_profile.get("temperature", 0.2 if mode == "dev" else 0.85))
         allow_code_exec = channel_profile.get("allow_code_exec", mode == "dev")
     else:
         guild_cfg = await db_helper.get_guild_config(guild_id) if (guild_id and guild_id != "dm") else None
         if guild_cfg and guild_cfg.get("default_mode"):
             mode = guild_cfg.get("default_mode", "hangout")
-            temp = 0.2 if mode == "dev" else 0.75
+            temp = 0.2 if mode == "dev" else 0.85
             allow_code_exec = (mode == "dev")
         else:
             mode = "hangout"
-            temp = 0.75
+            temp = 0.85
             allow_code_exec = False
 
     return {
         "engine": {
             "name": "Zauq (ذوق)",
-            "version": "3.2.5",
+            "version": ZAUQ_VERSION,
             "creator": "Syed Muhammad Hassan / AgenticEra Systems",
             "license": "Apache License 2.0",
             "backend_port": 8002,
@@ -260,14 +248,14 @@ async def get_full_system_info(channel_id: str, guild_id: Optional[str] = None):
             "input_chars_max": 120000,
             "output_tokens_max": 65536,
             "history_window": 8,
-            "sandbox_timeout_s": 5.0,
+            "sandbox_timeout_s": settings.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
             "sandbox_memory": "256m",
             "sandbox_cpus": "0.5"
         },
         "capabilities": {
-            "web_search": "Deep Web Roaming + Google Grounding + DuckDuckGo",
+            "web_search": "Serper search and bounded research; native grounding is optional",
             "voice_tts": "Microsoft Edge Neural TTS (19 Voices, 8 Languages)",
-            "image_generation": "Gemini Flash Image (Free) / DigitalOcean SD3.5",
+            "image_generation": "Gemini / DigitalOcean (provider billing applies)",
             "memory": "L1 (8 msgs) · L2 (768-dim vector facts + decay) · L3 (pgvector lore)",
             "ssrf_protection": "Active (DNS Filter & Private IP Blocking)",
             "multimodal": "Voice Notes (Urdu/English/etc), PDFs, DOCX, Code, Images"

@@ -1,8 +1,4 @@
-"""Capability Detection & Mapping for Zauq AI Models.
-
-Determines multimodal (vision/audio), streaming, thinking/reasoning mode,
-and native tool-calling capabilities dynamically per provider and model.
-"""
+"""Capability Detection & Mapping for Zauq AI Models."""
 
 from typing import Any, Dict, Optional
 from backend.models.catalog import normalize_provider_id, get_provider
@@ -23,18 +19,15 @@ def supports_vision(provider_id: str, model_name: Optional[str] = None) -> bool:
     m = (model_name or "").lower()
 
     if clean_id == "gemini":
-        # Gemma models are text-only; Gemini models are multimodal
         return not m.startswith("gemma")
     elif clean_id == "anthropic":
-        # Claude 3, 3.5, 3.7, 4.5 Sonnet/Opus/Haiku support images
-        return any(k in m for k in ["claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "claude-4"])
+        return any(k in m for k in ["claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "claude-4", "claude-5", "claude-fable"])
     elif clean_id == "qwen":
-        # Only Qwen-VL variants accept native images
         return "vl" in m
     elif clean_id == "deepseek":
-        return "vl" in m
+        return False
     elif clean_id == "ollama":
-        return any(k in m for k in ["llava", "vision", "vl"])
+        return False
     elif clean_id in ["digitalocean", "kaggle"]:
         return False
 
@@ -59,15 +52,15 @@ def supports_thinking(provider_id: str, model_name: Optional[str] = None) -> boo
     m = (model_name or "").lower()
 
     if clean_id == "gemini":
-        return True
+        return m.startswith(('gemini-2.5', 'gemini-3'))
     elif clean_id == "anthropic":
-        return any(k in m for k in ["claude-3-7", "claude-sonnet-4-5", "claude-opus-4-5"])
+        return any(k in m for k in ["claude-3-7", "claude-sonnet-4-5", "claude-opus-4-5", "claude-sonnet-5", "claude-opus-5", "claude-fable"])
     elif clean_id == "deepseek":
-        return "reasoner" in m or "r1" in m
+        return m in ('deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash') or 'reasoner' in m or 'r1' in m
     elif clean_id == "qwen":
-        return any(k in m for k in ["qwq", "qwen3.8-flash", "reasoning", "max"])
+        return (m.startswith('qwen3') or 'qwq' in m) and 'instruct' not in m and 'omni' not in m
     elif clean_id == "ollama":
-        return any(k in m for k in ["deepseek-r1", "qwq"])
+        return False
 
     return False
 
@@ -78,22 +71,18 @@ def supports_native_tools(provider_id: str, model_name: Optional[str] = None) ->
     m = (model_name or "").lower()
 
     if clean_id == "gemini":
-        # Gemma models are open weights text-only; Gemini models support native tools
         return not m.startswith("gemma")
     elif clean_id == "anthropic":
-        # Claude 3, 3.5, 3.7, 4.5 support native Claude tool use
-        return any(k in m for k in ["claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "claude-4"]) or not m
+        return any(k in m for k in ["claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "claude-4", "claude-5", "claude-fable"]) or not m
     elif clean_id == "qwen":
-        # Verified models on Alibaba Cloud Model Studio: qwen-turbo, qwen-plus, qwen-max, qwen2.5-*
-        return any(k in m for k in ["turbo", "plus", "max", "qwen2.5", "qwen-long"]) or not m
+        return any(k in m for k in ["turbo", "plus", "max", "qwen2.5", "qwen3", "qwq", "qwen-long"]) or not m
     elif clean_id == "deepseek":
-        # Official DeepSeek-V3 (deepseek-chat) supports tools; deepseek-reasoner (R1) does not
-        return "chat" in m or not m
+        if 'reasoner' in m or m.endswith('-r1') or m == 'deepseek-r1':
+            return False
+        return m in ('deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v3', 'deepseek-v3.2', 'deepseek-chat', 'deepseek-coder') or not m
     elif clean_id == "digitalocean":
-        # Opt-in allowlist after verification per hosted model
         return m in ["llama3.3-70b-instruct"]
     elif clean_id in ["ollama", "kaggle"]:
-        # Off by default until worker/model protocol is verified
         return False
 
     return False

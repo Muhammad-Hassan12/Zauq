@@ -3,7 +3,7 @@ import time
 import base64
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from typing import List, Dict, Optional, Any, Literal
@@ -41,6 +41,7 @@ class ChatRequest(BaseModel):
     deep_search: Optional[bool] = False
     search_category: Optional[str] = "all"
     search_query: Optional[str] = None
+    file_generation: bool = False
 
     @field_validator('messages')
     @classmethod
@@ -54,8 +55,14 @@ class ChatRequest(BaseModel):
                 raise ValueError(f"Message at index {i} must have 'role' and 'content' keys")
             if msg["role"] not in valid_roles:
                 raise ValueError(f"Message at index {i} has invalid role '{msg['role']}'. Must be one of: {valid_roles}")
-            if isinstance(msg["content"], str) and len(msg["content"]) > 15000:
-                raise ValueError(f"Message at index {i} content exceeds maximum length of 15,000 characters.")
+            content = msg["content"]
+            if isinstance(content, str):
+                if len(content) > 15000:
+                    raise ValueError(f"Message at index {i} content exceeds maximum length of 15,000 characters.")
+            elif content is not None:
+                import json as _json
+                if len(_json.dumps(content, ensure_ascii=False)) > 15000:
+                    raise ValueError(f"Message at index {i} content exceeds maximum serialized size of 15,000 characters.")
         return v
 
     @field_validator('attachments')
@@ -80,7 +87,7 @@ class ChannelProfileRequest(BaseModel):
 @router.post("/profile")
 async def update_channel_profile(req: ChannelProfileRequest):
     try:
-        temp = req.temperature if req.temperature is not None else (0.2 if req.operating_mode == "dev" else 0.75)
+        temp = req.temperature if req.temperature is not None else (0.2 if req.operating_mode == "dev" else 0.85)
         allow_exec = req.allow_code_exec if req.allow_code_exec is not None else (req.operating_mode == "dev")
         scope = (req.scope or "channel").lower()
 
@@ -95,6 +102,7 @@ async def update_channel_profile(req: ChannelProfileRequest):
                 raise HTTPException(status_code=400, detail="channel_id is required for channel-scoped configuration.")
             # Preserve existing thinking_enabled unless explicitly set
             existing_profile = await db_helper.get_channel_profile(req.channel_id) or {}
+            allow_exec = req.allow_code_exec if req.allow_code_exec is not None else existing_profile.get('allow_code_exec', req.operating_mode == 'dev')
             thinking = req.thinking_enabled if req.thinking_enabled is not None else existing_profile.get("thinking_enabled", False)
             res = await db_helper.upsert_channel_profile(
                 channel_id=req.channel_id,
@@ -106,10 +114,10 @@ async def update_channel_profile(req: ChannelProfileRequest):
             )
             return {"status": "success", "scope": "channel", "data": res}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Operation failed. Please try again.")
 
 @router.post("/profile/reset")
-async def reset_channel_profile(channel_id: str):
+async def reset_channel_profile(channel_id: str = Query(..., max_length=30)):
     """Deletes a channel mode override so the channel inherits the community server default mode."""
     success = await db_helper.delete_channel_profile(channel_id)
     return {
@@ -131,6 +139,10 @@ async def toggle_thinking_mode(req: ThinkingToggleRequest):
     Preserves all existing channel profile settings (mode, temperature, etc.).
     """
     try:
+        from backend.routers.model import get_model_status
+        from backend.models.capabilities import supports_thinking
+        selection = await get_model_status(req.channel_id, req.guild_id)
+        supported = supports_thinking(selection['provider'], selection['model_name'])
         res = await db_helper.set_channel_thinking(
             channel_id=req.channel_id,
             guild_id=req.guild_id or "dm",
@@ -140,10 +152,13 @@ async def toggle_thinking_mode(req: ThinkingToggleRequest):
             "status": "success",
             "channel_id": req.channel_id,
             "thinking_enabled": req.thinking_enabled,
+            "thinking_effective": req.thinking_enabled and supported,
+            "thinking_supported": supported,
+            "detail": 'Native thinking requested for supported models.' if supported else 'Preference saved; selected model has no verified native thinking control.',
             "data": res
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Operation failed. Please try again.")
 
 from backend.chat.context_builder import context_builder, DEV_PERSONA_SEED, HANGOUT_PERSONA_SEED
 from backend.chat.orchestrator import chat_orchestrator
@@ -176,57 +191,25 @@ async def chat_completion(req: ChatRequest, background_tasks: BackgroundTasks):
 
 
 @router.post("/stream")
-async def chat_completion_stream(req: ChatRequest):
-    start_time = time.time()
-    persona, mode, temp, provider, model_name, enable_search, thinking_enabled = await _build_chat_context(req)
+async def chat_completion_stream(req: ChatRequest, background_tasks: BackgroundTasks = None):
+    """Chunk the complete, sanitized answer from the shared orchestration path.
 
-    media_parts = []
-    if req.attachments:
-        for att in req.attachments:
-            if att.bytes_b64:
-                try:
-                    raw_bytes = base64.b64decode(att.bytes_b64)
-                    parsed = parse_attachment(raw_bytes, att.filename, att.content_type or "")
-                    if parsed["type"] in ["image", "audio"]:
-                        media_parts.append(parsed)
-                except Exception:
-                    pass
+    Generation is buffered so tools, fallback, attachments and secret redaction
+    finish before any answer bytes are sent. Native provider streaming remains
+    available through ModelRouter.generate_stream for direct integrations.
+    """
+    import json
+    background_tasks = background_tasks or BackgroundTasks()
+    payload = await chat_completion(req, background_tasks)
 
     async def event_generator():
-        collected_chunks = []
-        try:
-            async for chunk in model_router.generate_stream(
-                messages=req.messages,
-                provider=provider,
-                model_name=model_name,
-                system_prompt=persona,
-                temperature=temp,
-                media_parts=media_parts,
-                enable_search=enable_search,
-                thinking_enabled=thinking_enabled
-            ):
-                collected_chunks.append(chunk)
-                yield chunk
+        for offset in range(0, len(payload["response"]), 1024):
+            yield payload["response"][offset:offset + 1024]
 
-            duration_ms = int((time.time() - start_time) * 1000)
-            asyncio.create_task(
-                log_request_metric(req.guild_id, req.channel_id, req.user_id, 1, provider, model_name, duration_ms)
-            )
-
-            full_response = "".join(collected_chunks)
-            clean_text, _ = extract_generated_files(full_response)
-            if req.user_id and clean_text:
-                asyncio.create_task(
-                    extract_and_store_user_memories(
-                        user_id=req.user_id,
-                        messages=req.messages + [{"role": "assistant", "content": clean_text}],
-                        provider=provider,
-                        model_name=model_name
-                    )
-                )
-
-        except Exception as e:
-            logger.error(f"Streaming error: {e}")
-            yield f"\n[Error: {str(e)}]"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    metadata = {key: payload[key] for key in (
+        "provider", "model", "request_id", "fallback_triggered", "incomplete", "tool_steps"
+    ) if key in payload}
+    return StreamingResponse(
+        event_generator(), media_type="text/event-stream", background=background_tasks,
+        headers={"X-Zauq-Metadata": json.dumps(metadata, ensure_ascii=True)},
+    )

@@ -19,10 +19,10 @@ class ToolPolicy:
     SECURITY INVARIANT: The LLM is never the security authority.
     ToolPolicy always runs before ToolExecutor calls any handler.
 
-    Risk level semantics (Phase 1):
+    Risk level semantics:
       read        -> auto-allowed
-      write       -> DENY (Phase 7 will upgrade to REQUIRE_CONFIRMATION)
-      destructive -> DENY always
+      write       -> require explicit single-use approval
+      destructive -> require explicit single-use approval
       privileged  -> DENY unless in the explicit allowlist AND channel permission
                      is satisfied
 
@@ -30,9 +30,6 @@ class ToolPolicy:
     privileged allowlist, but it still requires allow_code_exec=True from
     the channel profile to actually execute.
     """
-
-    # Auto-denied in Phase 1. Phase 7 will add the approval flow for "write".
-    _BLOCKED: frozenset[RiskLevel] = frozenset({"write", "destructive"})
 
     def __init__(self, privileged_allowlist: set[str] | None = None) -> None:
         """
@@ -50,6 +47,8 @@ class ToolPolicy:
         allow_code_exec: bool = False,
         guild_id: str | None = None,
         is_approved: bool = False,
+        automatic: bool = False,
+        auto_code_test_mode: str = 'off',
     ) -> PolicyDecision:
         """
         Return the policy decision for this tool call.
@@ -61,13 +60,13 @@ class ToolPolicy:
             guild_id:        Discord guild ID of the requesting context.
             is_approved:     Whether human approval has already been granted.
         """
-        # Disabled tool — never run
+        # Disabled tool... never run
         if not spec.enabled:
             logger.warning(f"Policy DENY: tool '{spec.name}' is disabled")
             return PolicyDecision.DENY
 
         # Guild access scope check (e.g. MCP tools restricted to specific guilds)
-        if spec.allowed_guild_ids:
+        if spec.allowed_guild_ids is not None:
             if not guild_id or guild_id not in spec.allowed_guild_ids:
                 logger.warning(
                     f"Policy DENY: tool '{spec.name}' is scoped to guilds {spec.allowed_guild_ids}, "
@@ -96,7 +95,7 @@ class ToolPolicy:
                 return PolicyDecision.DENY
 
             # code.execute additionally requires channel-level permission
-            if spec.name == "code.execute" and not allow_code_exec:
+            if spec.name == "code.execute" and (not allow_code_exec or (automatic and auto_code_test_mode not in ('auto', 'always'))):
                 logger.warning(
                     "Policy DENY: code.execute is in privileged allowlist but "
                     "allow_code_exec=False for this channel"

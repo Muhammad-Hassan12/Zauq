@@ -1,9 +1,4 @@
-"""DeepSeek Direct API Client for Zauq AI.
-
-Direct first-party connectivity to official DeepSeek API endpoints.
-Maintains independent provider identity, default models, reasoning parameters, and telemetry.
-"""
-
+from backend.memory.usage import record_usage
 import json
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -29,7 +24,7 @@ class DeepSeekClient:
         raw_url = base_url or getattr(settings, "DEEPSEEK_BASE_URL", "https://api.deepseek.com") or "https://api.deepseek.com"
         self.base_url = raw_url.rstrip("/")
         self.api_key = api_key if api_key is not None else getattr(settings, "DEEPSEEK_API_KEY", "")
-        self.default_model = default_model or getattr(settings, "DEEPSEEK_DEFAULT_MODEL", "deepseek-chat") or "deepseek-chat"
+        self.default_model = default_model or settings.DEEPSEEK_DEFAULT_MODEL or 'deepseek-flash'
 
     def _headers(self) -> Dict[str, str]:
         if not self.api_key:
@@ -49,10 +44,7 @@ class DeepSeekClient:
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> tuple[str, Dict[str, Any]]:
-        # If thinking is enabled and default/chat model was requested (and not tool-calling), upgrade to deepseek-reasoner
         model = model_name or self.default_model
-        if thinking_enabled and model == "deepseek-chat" and not tools:
-            model = "deepseek-reasoner"
 
         formatted_messages: List[Dict[str, Any]] = []
         if system_prompt:
@@ -61,8 +53,12 @@ class DeepSeekClient:
         for raw_msg in messages:
             msg = raw_msg.to_dict() if isinstance(raw_msg, ToolResultMessage) else raw_msg
             role = msg.get("role", "user")
+            continuation = msg.get('_provider_continuation', {})
+            if role in ('assistant', 'model') and continuation.get('provider') == 'deepseek':
+                import copy
+                formatted_messages.append(copy.deepcopy(continuation['content']))
+                continue
 
-            # 1. Tool execution result
             if role == "tool":
                 call_id = msg.get("tool_call_id", "")
                 name = msg.get("tool_name") or msg.get("name", "")
@@ -75,7 +71,6 @@ class DeepSeekClient:
                 })
                 continue
 
-            # 2. Assistant turn with prior tool calls
             if role in ["assistant", "model"] and msg.get("tool_calls"):
                 raw_calls = []
                 for tc in msg.get("tool_calls", []):
@@ -99,7 +94,6 @@ class DeepSeekClient:
                 })
                 continue
 
-            # 3. Standard text message
             formatted_messages.append({
                 "role": role,
                 "content": str(msg.get("content", ""))
@@ -114,8 +108,11 @@ class DeepSeekClient:
             "max_tokens": max_tokens,
             "stream": stream,
         }
+        if model in ('deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'):
+            payload['thinking'] = {'type': 'enabled' if thinking_enabled else 'disabled'}
+            if thinking_enabled:
+                payload.pop('temperature', None)
 
-        # deepseek-reasoner does not support custom temperature
         if "reasoner" in model.lower():
             payload.pop("temperature", None)
 
@@ -159,6 +156,7 @@ class DeepSeekClient:
                 )
 
             data = response.json()
+            record_usage('deepseek', payload.get("model", self.default_model), data)
             try:
                 msg = data["choices"][0]["message"]
                 raw_text = msg.get("content") or ""
@@ -248,6 +246,7 @@ class DeepSeekClient:
                 )
 
             data = response.json()
+            record_usage('deepseek', payload.get("model", self.default_model), data)
             try:
                 choice = data["choices"][0]["message"]
                 raw_content = choice.get("content")
@@ -273,8 +272,8 @@ class DeepSeekClient:
                 return AgentModelTurn(
                     text=clean_text if clean_text else None,
                     tool_calls=tool_calls,
-                    raw_metadata=data
+                    raw_metadata=data,
+                    provider_continuation={'provider':'deepseek','content':choice},
                 )
             except (KeyError, IndexError) as e:
                 raise RuntimeError(f"Unexpected response format from DeepSeek API: {data} ({e})")
-

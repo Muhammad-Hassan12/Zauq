@@ -12,8 +12,11 @@ CREATE TABLE IF NOT EXISTS pending_actions (
     status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'denied' | 'expired' | 'executed'
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
-    executed_at TIMESTAMPTZ
+    executed_at TIMESTAMPTZ,
+    signature TEXT
 );
+ALTER TABLE pending_actions ADD COLUMN IF NOT EXISTS signature TEXT;
+ALTER TABLE pending_actions ENABLE ROW LEVEL SECURITY;
 
 CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_pending_actions_expires_at ON pending_actions (expires_at);

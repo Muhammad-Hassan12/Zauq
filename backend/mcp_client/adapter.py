@@ -1,9 +1,8 @@
-"""Adapter to convert MCP tools into Zauq ToolSpec objects and execution handlers."""
-
 from __future__ import annotations
 import logging
 from typing import Any, Callable, Awaitable
 from backend.tools.base import ToolSpec, RiskLevel
+from backend.security.sanitizer import sanitize_secrets
 from backend.mcp_client.models import MCPServerConfig
 
 logger = logging.getLogger("zauq.mcp.adapter")
@@ -158,15 +157,16 @@ def mcp_tool_to_spec(
 
     spec = ToolSpec(
         name=canonical_name,
-        description=description,
+        description=sanitize_secrets(description),
         input_schema=input_schema,
         source="mcp",
         risk=tool_risk,
         timeout_seconds=server_config.timeout_seconds,
-        enabled=server_config.enabled,
+        enabled=server_config.enabled and (original_name in server_config.allowed_tools or original_name in server_config.tool_risks),
         server_id=server_config.id,
         original_tool_name=original_name,
-        allowed_guild_ids=list(server_config.allowed_guild_ids) if server_config.allowed_guild_ids else None,
+        allowed_guild_ids=None if server_config.allow_global_access else list(server_config.allowed_guild_ids),
+        selection_keywords=list(server_config.selection_keywords),
         _handler=handler,
     )
 

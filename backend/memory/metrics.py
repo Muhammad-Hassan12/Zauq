@@ -10,34 +10,23 @@ logger = logging.getLogger("zauq.metrics")
 # In-memory metrics fallback buffer (bounded at 1000 items)
 IN_MEMORY_LOGS: List[Dict[str, Any]] = []
 
-# Metadata-driven cost rates per 1,000,000 tokens [prompt_rate_usd, completion_rate_usd]
-_PROVIDER_PRICING_PER_MILLION: Dict[str, tuple[float, float]] = {
-    "gemini": (0.075, 0.30),
-    "anthropic": (3.00, 15.00),
-    "qwen": (0.14, 0.28),
-    "deepseek": (0.14, 0.28),
-    "digitalocean": (0.15, 0.60),
-    "ollama": (0.0, 0.0),
-    "kaggle": (0.0, 0.0),
-}
+def estimate_provider_cost(provider, model_name, input_tokens, output_tokens):
+    """Use operator-supplied per-model USD rates per million tokens.
 
-
-def estimate_provider_cost(
-    provider: str,
-    model_name: str,
-    input_tokens: Optional[int],
-    output_tokens: Optional[int],
-) -> Optional[float]:
-    """Estimates LLM provider invocation cost based on token counts."""
-    if input_tokens is None and output_tokens is None:
+    Unknown usage or pricing is unknown cost, never a fabricated zero bill.
+    """
+    import json
+    import math
+    from backend.config import settings
+    if input_tokens is None or output_tokens is None:
         return None
-
-    prov = provider.lower().strip()
-    prompt_rate, comp_rate = _PROVIDER_PRICING_PER_MILLION.get(prov, (0.15, 0.60))
-
-    in_cost = ((input_tokens or 0) / 1_000_000.0) * prompt_rate
-    out_cost = ((output_tokens or 0) / 1_000_000.0) * comp_rate
-    return round(in_cost + out_cost, 6)
+    try:
+        rates = json.loads(settings.MODEL_PRICING_JSON).get(f"{provider}:{model_name}")
+        if not rates or len(rates) != 2 or any(not isinstance(r, (int,float)) or isinstance(r, bool) or not math.isfinite(r) or r < 0 for r in rates):
+            return None
+        return round((input_tokens*rates[0] + output_tokens*rates[1])/1_000_000, 8)
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 async def log_request_metric(
@@ -61,6 +50,8 @@ async def log_request_metric(
     estimated_provider_cost: Optional[float] = None,
     request_id: Optional[str] = None,
     agent_run_id: Optional[str] = None,
+    provider_usage: Optional[list] = None,
+    status: str = "ok",
 ):
     """
     Logs an API request metric with Phase 11 observability telemetry.
@@ -69,6 +60,9 @@ async def log_request_metric(
     if estimated_provider_cost is None and (input_tokens or output_tokens):
         estimated_provider_cost = estimate_provider_cost(provider, model_name, input_tokens, output_tokens)
 
+    if provider_usage:
+        costs = [estimate_provider_cost(r['provider'],r['model'],r['input_tokens'],r['output_tokens']) if not r.get('cache_read_input_tokens') and not r.get('cache_creation_input_tokens') else None for r in provider_usage]
+        estimated_provider_cost = sum(costs) if all(c is not None for c in costs) else None
     entry = {
         "guild_id": guild_id or "dm",
         "channel_id": channel_id,
@@ -90,6 +84,8 @@ async def log_request_metric(
         "request_id": request_id,
         "agent_run_id": agent_run_id,
         "timestamp": time.time(),
+        "provider_usage": provider_usage or [],
+        "status": status,
     }
     IN_MEMORY_LOGS.append(entry)
 
@@ -99,15 +95,8 @@ async def log_request_metric(
 
     if db_helper.supabase:
         try:
-            payload = {
-                "guild_id": guild_id or "dm",
-                "channel_id": channel_id,
-                "user_id": user_id or "anonymous",
-                "tier": tier,
-                "provider": provider,
-                "model_name": model_name,
-                "response_time_ms": response_time_ms,
-            }
+            payload = {key:value for key,value in entry.items() if key not in ('timestamp','estimated_provider_cost')}
+            payload['estimated_cost_usd'] = estimated_provider_cost
             await asyncio.to_thread(lambda: db_helper.supabase.table("request_logs").insert(payload).execute())
         except Exception as e:
             logger.warning(f"Could not persist request log to Supabase: {e}")
@@ -119,6 +108,14 @@ async def get_metrics_summary(guild_id: Optional[str] = None) -> Dict[str, Any]:
     v4 tool telemetry, token metrics, cost estimates, and cache stats.
     """
     cache_info = search_cache.stats
+    if db_helper.supabase:
+        try:
+            response = await asyncio.to_thread(lambda: db_helper.supabase.rpc('v4_metrics_summary', {'requested_guild': None if guild_id in (None,'global') else guild_id}).execute())
+            if isinstance(response.data, dict):
+                return {**response.data, 'source':'database', 'cache_stats':cache_info}
+        except Exception:
+            logger.warning('Durable metrics summary unavailable; reporting bounded local buffer.')
+
 
     # Filter in-memory logs
     filtered_logs = [
@@ -142,6 +139,9 @@ async def get_metrics_summary(guild_id: Optional[str] = None) -> Dict[str, Any]:
             "total_estimated_cost_usd": 0.0,
             "cache_stats": cache_info,
             "source": "in_memory",
+            "window": "last 1000 requests in this process",
+            "unknown_cost_requests": 0,
+            "unknown_usage_requests": 0,
         }
 
     avg_latency = sum(log["response_time_ms"] for log in filtered_logs) / total_reqs
@@ -155,6 +155,8 @@ async def get_metrics_summary(guild_id: Optional[str] = None) -> Dict[str, Any]:
     total_input_tokens = 0
     total_output_tokens = 0
     total_cost = 0.0
+    unknown_cost_requests = 0
+    unknown_usage_requests = 0
 
     for log in filtered_logs:
         prov = log.get("provider", "gemini").upper()
@@ -168,6 +170,8 @@ async def get_metrics_summary(guild_id: Optional[str] = None) -> Dict[str, Any]:
         total_input_tokens += log.get("input_tokens") or 0
         total_output_tokens += log.get("output_tokens") or 0
         total_cost += log.get("estimated_provider_cost") or 0.0
+        unknown_cost_requests += int(log.get("estimated_provider_cost") is None)
+        unknown_usage_requests += int(log.get("input_tokens") is None or log.get("output_tokens") is None)
 
     return {
         "total_requests": total_reqs,
@@ -181,7 +185,11 @@ async def get_metrics_summary(guild_id: Optional[str] = None) -> Dict[str, Any]:
         "total_tool_failures": total_tool_failures,
         "total_input_tokens": total_input_tokens,
         "total_output_tokens": total_output_tokens,
-        "total_estimated_cost_usd": round(total_cost, 6),
+        "total_estimated_cost_usd": None if unknown_cost_requests else round(total_cost, 6),
+        "known_estimated_cost_usd": round(total_cost, 6),
+        "unknown_cost_requests": unknown_cost_requests,
+        "unknown_usage_requests": unknown_usage_requests,
+        "window": "last 1000 requests in this process",
         "cache_stats": cache_info,
         "source": "in_memory",
     }

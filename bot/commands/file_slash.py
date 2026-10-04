@@ -45,11 +45,12 @@ class FileSlash(commands.Cog):
             "guild_id": guild_id,
             "user_id": str(interaction.user.id),
             "user_name": interaction.user.display_name,
-            "messages": [{"role": "user", "content": full_prompt}]
+            "messages": [{"role": "user", "content": full_prompt}],
+            "file_generation": True
         }
 
         try:
-            async with api_client(timeout=180.0) as client:
+            async with api_client(timeout=610.0) as client:
                 res = await client.post(f"{BACKEND_URL}/api/chat", json=payload)
                 if res.status_code != 200:
                     await interaction.followup.send(f"⚠️ File generation failed ({res.status_code}): {res.text}")

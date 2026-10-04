@@ -16,7 +16,7 @@ from backend.config import settings
 
 logger = logging.getLogger("zauq.search.service")
 
-# ── Query optimizer ───────────────────────────────────────────────────────────
+# Query optimizer
 
 _FILLER_PATTERNS = [
     re.compile(
@@ -64,7 +64,7 @@ def optimize_queries(raw_query: str, max_queries: int = 3) -> list[str]:
     return queries[:max_queries]
 
 
-# ── Search/should-search heuristic (preserved from v3) ────────────────────────
+# Search/should-search heuristic (preserved from v3)
 
 _EXPLICIT_TRIGGERS = frozenset({
     "search", "look up", "find info", "find information", "find out",
@@ -107,10 +107,10 @@ def extract_urls(text: str) -> list[str]:
     """Extract all http/https URLs from free text."""
     if not text:
         return []
-    return re.findall(r'https?://(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^\s()<>]*)*', text)
+    return [u.rstrip('.,;:!?') for u in re.findall(r'https?://[^\s<>\[\]()"\x27`]+', text)]
 
 
-# ── Evidence Extraction & Query Decomposition (Phase 10) ──────────────────────
+# Evidence Extraction & Query Decomposition
 
 _BOILERPLATE_PATTERNS = [
     re.compile(r'cookie|privacy policy|terms of (?:service|use)|all rights reserved|sign in|log in|subscribe', re.I),
@@ -206,7 +206,7 @@ def decompose_deep_research_queries(topic: str, max_queries: int = 3) -> list[st
     return candidates[:max_queries]
 
 
-# ── SearchService ─────────────────────────────────────────────────────────────
+# SearchService
 
 class SearchService:
     """
@@ -214,9 +214,7 @@ class SearchService:
     - backend/tools/native/web_tools.py (Phase 2)
     - backend/routers/chat.py (Phase 4 agent runtime integration)
 
-    Routing:
-      SERPER_API_KEY set   -> Serper provider (primary)
-      no key              -> DuckDuckGo legacy fallback (via web_search_engine)
+    Routing: Serper only; missing credentials return an explicit unavailable error.
 
     All results go through the in-process TTL cache.
     """
@@ -224,7 +222,7 @@ class SearchService:
     def __init__(self, provider: SerperProvider | None = None) -> None:
         self._serper = provider or serper
 
-    # ── Core: search ─────────────────────────────────────────────────────────
+    # Core: search
 
     async def search(
         self,
@@ -234,30 +232,32 @@ class SearchService:
     ) -> SearchResponse:
         """
         Execute a web search, with caching.
-        Routes to Serper when key is available, DuckDuckGo otherwise.
+        Returns an explicit error when Serper is unavailable.
         """
-        n = max_results or settings.WEB_SEARCH_MAX_RESULTS
-        provider_name = "serper" if self._serper.available else "duckduckgo"
+        n = max(1, min(max_results or settings.WEB_SEARCH_MAX_RESULTS, 10))
+        provider_name = 'serper'
+        if settings.WEB_SEARCH_PROVIDER != 'serper':
+            return SearchResponse(query=query, category=category, error='Unsupported configured search provider; use serper', search_calls=0)
 
         cache_key = search_cache.make_key(provider_name, query, category, n)
         ttl = search_cache.ttl_for_category(category)
         cached = search_cache.get(cache_key, ttl=ttl)
         if cached is not None:
-            logger.debug(f"Cache hit for query='{query}' category={category}")
-            cached.from_cache = True
-            return cached
+            logger.debug('Search cache hit category=%s', category)
+            from dataclasses import replace
+            return replace(cached, from_cache=True, search_calls=0)
 
         if self._serper.available:
             result = await self._serper.search(query, category=category, max_results=n)
         else:
-            logger.warning(f"SERPER_API_KEY not configured. Web search unavailable for '{query}'.")
-            result = SearchResponse(query=query, results=[], category=category, provider="serper")
+            logger.warning('SERPER_API_KEY not configured. Web search unavailable.')
+            result = SearchResponse(query=query, results=[], category=category, provider="serper", error='Search unavailable: SERPER_API_KEY is not configured', search_calls=0)
 
-        if result.results:
+        if result.results and not result.error:
             search_cache.set(cache_key, result)
         return result
 
-    # ── Core: fetch ───────────────────────────────────────────────────────────
+    # Core: fetch
 
     async def fetch(self, url: str, max_chars: int = 8000) -> FetchResult:
         """Fetch readable content from a single URL."""
@@ -277,7 +277,7 @@ class SearchService:
             max_pages=max_pages,
         )
 
-    # ── Phase 10: Research Mode v2 (Bounded Deep Research Engine) ───────────
+    # Research Mode v2 (Bounded Deep Research Engine)
 
     async def deep_research(
         self,
@@ -299,136 +299,68 @@ class SearchService:
         """
         import asyncio
 
-        # 1. Generate max 3 focused queries
-        queries = decompose_deep_research_queries(topic, max_queries=min(max_queries, 3))
-
-        # 2. Parallel Serper search
-        search_tasks = [
-            self.search(q, category=category, max_results=5)
-            for q in queries
-        ]
-        search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-
-        # 3. Deduplicate URLs across all queries
-        unique_results_map: dict[str, SearchResult] = {}
-        for res in search_results:
-            if isinstance(res, SearchResponse):
-                for r in res.results:
-                    if r.url and is_safe_public_url(r.url) and r.url not in unique_results_map:
-                        unique_results_map[r.url] = r
-
-        # Fallback query if 0 results found (max 1 fallback attempt per Phase 10 budget)
-        if not unique_results_map:
-            logger.info(f"0 results from initial {len(queries)} queries. Trying 1 fallback query.")
-            keywords = [w for w in topic.split() if w.lower() not in _STOP_WORDS and len(w) > 2]
-            fallback_candidates = []
-            if len(keywords) > 2:
-                fallback_candidates.append(" ".join(keywords[:3]))
-                fallback_candidates.append(" ".join(keywords[-3:]))
-            if len(keywords) >= 2:
-                fallback_candidates.append(f"{keywords[0]} {keywords[1]}")
-            elif keywords:
-                fallback_candidates.append(keywords[0])
-            fallback_candidates.append(f"{topic} overview")
-
-            fallback_q = None
-            for cand in fallback_candidates:
-                if cand and cand not in queries:
-                    fallback_q = cand
-                    break
-
-            if not fallback_q:
-                fallback_q = f"{topic} info"
-
-            fb_res = await self.search(fallback_q, category=category, max_results=5)
-            for r in fb_res.results:
-                if r.url and is_safe_public_url(r.url) and r.url not in unique_results_map:
-                    unique_results_map[r.url] = r
+        max_queries = max(1, min(int(max_queries), 3))
+        max_pages = max(0, min(int(max_pages), 5))
+        total_char_limit = max(0, min(int(total_char_limit), 50000))
+        queries = decompose_deep_research_queries(topic, max_queries=max_queries)
+        responses = await asyncio.gather(*[
+            self.search(q, category=category, max_results=5) for q in queries
+        ], return_exceptions=True)
+        unique = {}
+        search_calls = sum(1 if isinstance(r, Exception) else r.search_calls for r in responses)
+        errors = [r.error for r in responses if isinstance(r, SearchResponse) and r.error]
+        if any(isinstance(r, Exception) for r in responses):
+            errors.append("A research search request failed.")
+        for response in responses:
+            if isinstance(response, SearchResponse):
+                for result in response.results:
+                    if result.url and is_safe_public_url(result.url):
+                        unique.setdefault(result.url, result)
+        # Retry an empty result set once; authentication/outage failures are not retried.
+        if not unique and not errors:
+            fallback_q = f"{topic.strip()} overview"
+            if fallback_q in queries:
+                fallback_q = f"{topic.strip()} info"
+            response = await self.search(fallback_q, category=category, max_results=5)
+            search_calls += response.search_calls
             queries.append(fallback_q)
-
-        candidate_urls = list(unique_results_map.keys())[:max_pages]
-
-        # 4. Fetch max 5 pages concurrently
-        fetched_map: dict[str, FetchResult] = {}
-        if candidate_urls:
-            fetch_results = await self.fetch_many(
-                candidate_urls,
-                max_chars_per_page=6000,
-                max_pages=max_pages,
-            )
-            for fr in fetch_results:
-                fetched_map[fr.url] = fr
-
-        # 5. Source / Evidence Extraction with graceful degradation
-        evidence_items: list[EvidenceItem] = []
-        citations: list[str] = []
+            if response.error:
+                errors.append(response.error)
+            for result in response.results:
+                if result.url and is_safe_public_url(result.url):
+                    unique.setdefault(result.url, result)
+        urls = list(unique)[:max_pages]
+        fetched = await self.fetch_many(urls, max_chars_per_page=6000, max_pages=max_pages) if urls else []
+        fetched_by_url = {r.url: r for r in fetched}
+        evidence, citations, blocks = [], [], []
+        accumulated = 0
         degraded = False
-        accumulated_chars = 0
-
-        for url in candidate_urls:
-            sr = unique_results_map[url]
-            fr = fetched_map.get(url)
-
-            # Build verified citation
-            clean_title = (sr.title[:60] + "...") if len(sr.title) > 60 else sr.title
-            citations.append(f"• [{clean_title}]({url})")
-
-            # Check if fetch was successful and substantive
-            excerpt = ""
-            if fr and fr.success and fr.content and len(fr.content.strip()) >= 20:
-                excerpt = extract_evidence_excerpt(fr.content, topic, max_chars=5000)
-
-            if excerpt:
-                # Substantive page content retrieved
-                pass
-            else:
-                # Graceful degradation to snippet
+        for url in urls:
+            result = unique[url]
+            page = fetched_by_url.get(url)
+            excerpt = extract_evidence_excerpt(page.content, topic, max_chars=5000) if page and page.success else ""
+            verified = bool(excerpt)
+            if not verified:
                 degraded = True
-                excerpt = sr.snippet or f"Summary for {sr.title}"
-
-            # Check total character ceiling (35k - 50k chars)
-            if accumulated_chars + len(excerpt) > total_char_limit:
-                allowed_chars = max(0, total_char_limit - accumulated_chars)
-                if allowed_chars > 200:
-                    excerpt = excerpt[:allowed_chars] + "\n...[Evidence budget cap reached]"
-                    evidence_items.append(
-                        EvidenceItem(
-                            claim=sr.title,
-                            source_url=url,
-                            source_title=sr.title,
-                            excerpt=excerpt,
-                        )
-                    )
-                break
-
-            evidence_items.append(
-                EvidenceItem(
-                    claim=sr.title,
-                    source_url=url,
-                    source_title=sr.title,
-                    excerpt=excerpt,
-                )
-            )
-            accumulated_chars += len(excerpt)
-
-        # 6. Assemble rich context text
-        context_blocks = ["### 📑 Multi-Source Web Research Evidence:"]
-        for ev in evidence_items:
-            context_blocks.append(f"--- Source: {ev.source_title} ({ev.source_url}) ---\n{ev.excerpt}\n")
-
-        context_text = "\n".join(context_blocks)
-
+                excerpt = result.snippet
+            excerpt = excerpt[:max(0, total_char_limit - accumulated)]
+            if not excerpt:
+                continue
+            title = result.title[:200]
+            evidence.append(EvidenceItem(title, url, title, excerpt, fetched=verified))
+            citations.append(f"• [{title[:60]}]({url})" + (" (search snippet only)" if not verified else ""))
+            blocks.append(f"--- {'Fetched page' if verified else 'Search snippet only'}: {title} ({url}) ---\n{excerpt}")
+            accumulated += len(excerpt)
+        context = ("### 📑 Multi-Source Web Research Evidence:\n" + "\n".join(blocks))[:total_char_limit] if blocks else ""
         return ResearchResult(
-            topic=topic,
-            queries=queries,
-            evidence=evidence_items,
-            citations=citations,
-            context_text=context_text,
-            total_chars=accumulated_chars,
-            degraded=degraded,
+            topic=topic, queries=queries, evidence=evidence, citations=citations,
+            context_text=context, total_chars=accumulated, degraded=degraded,
+            error="; ".join(dict.fromkeys(errors)) if errors and not evidence else None,
+            search_calls=search_calls,
+            pages_fetched=sum(bool(r.success and r.content.strip()) for r in fetched),
         )
 
-    # ── Composite: search + fetch (Quick or Deep research) ────────────────────
+    # Composite: search + fetch (Quick or Deep research)
 
     async def search_and_fetch(
         self,
@@ -458,23 +390,24 @@ class SearchService:
                     for ev in res.evidence
                 ],
                 "roamed_pages": [
-                    {"title": ev.source_title, "url": ev.source_url, "content": ev.excerpt}
+                    {"title": ev.source_title, "url": ev.source_url, "content": ev.excerpt, "fetched": ev.fetched}
                     for ev in res.evidence
                 ],
                 "context_text": res.context_text,
                 "citations": res.citations,
                 "provider": "serper",
                 "degraded": res.degraded,
+                "error": res.error,
+                "search_calls": res.search_calls,
+                "pages_fetched": res.pages_fetched,
             }
 
         # Quick Research: 1 query, 5 results, top 2 pages with evidence excerpts
-        n = max_results or settings.WEB_SEARCH_MAX_RESULTS
+        n = max(1, min(max_results or settings.WEB_SEARCH_MAX_RESULTS, 10))
         cleaned_queries = optimize_queries(query, max_queries=1)
         primary_q = cleaned_queries[0] if cleaned_queries else query
 
         search_resp = await self.search(primary_q, category=category, max_results=n)
-        if not search_resp.results and category != "all":
-            search_resp = await self.search(primary_q, category="all", max_results=n)
 
         citations = []
         for r in search_resp.results[:5]:
@@ -482,14 +415,16 @@ class SearchService:
             citations.append(f"• [{label}]({r.url})")
 
         fetched_pages = []
+        fetch_top_n = max(0, min(fetch_top_n, 2))
         fetch_urls_list = [r.url for r in search_resp.results[:fetch_top_n] if r.url]
         if fetch_urls_list:
             fetch_results = await self.fetch_many(
                 fetch_urls_list,
                 max_chars_per_page=max_chars_per_page,
             )
-            for idx, fr in enumerate(fetch_results):
-                sr = search_resp.results[idx] if idx < len(search_resp.results) else None
+            results_by_url = {r.url: r for r in search_resp.results}
+            for fr in fetch_results:
+                sr = results_by_url.get(fr.url)
                 title = sr.title if sr else fr.url
                 if fr.success and len(fr.content.strip()) >= 20:
                     excerpt = extract_evidence_excerpt(fr.content, query, max_chars=max_chars_per_page)
@@ -497,6 +432,7 @@ class SearchService:
                         "title": title,
                         "url": fr.url,
                         "content": excerpt,
+                        "fetched": True,
                     })
                 elif sr and sr.snippet:
                     # Degradation to snippet on single-page fetch failure
@@ -504,13 +440,14 @@ class SearchService:
                         "title": title,
                         "url": fr.url,
                         "content": sr.snippet,
+                        "fetched": False,
                     })
 
         context_blocks = []
         if fetched_pages:
             context_blocks.append("### 📑 Full-Page Web Research Context:")
             for p in fetched_pages:
-                context_blocks.append(f"--- Source: {p['title']} ({p['url']}) ---\n{p['content']}\n")
+                context_blocks.append(f"--- {'Fetched page' if p['fetched'] else 'Search snippet only'}: {p['title']} ({p['url']}) ---\n{p['content']}\n")
         elif search_resp.results:
             context_blocks.append("### 🌐 Live Web Search Snippets:")
             for r in search_resp.results[:4]:
@@ -529,6 +466,9 @@ class SearchService:
             "citations": citations,
             "provider": search_resp.provider,
             "from_cache": search_resp.from_cache,
+            "search_calls": search_resp.search_calls,
+            "pages_fetched": sum(p["fetched"] for p in fetched_pages),
+            "error": search_resp.error,
         }
 
 

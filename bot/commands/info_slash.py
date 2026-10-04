@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from backend.config import settings
+from backend.version import ZAUQ_VERSION
 from bot.api import BACKEND_URL, api_client
 
 PROVIDER_DISPLAY_NAMES = {
@@ -51,14 +52,14 @@ class InfoSlash(commands.Cog):
 
                 mode_name = persona.get("mode", "hangout")
                 mode_badge = "🛠️ Dev Mode" if mode_name == "dev" else "💬 Hangout Mode"
-                temp = persona.get("temperature", 0.75)
+                temp = persona.get("temperature", 0.85)
                 exec_badge = "✅ Enabled (Docker Sandbox)" if persona.get("allow_code_exec") else "❌ Disabled"
-                thinking_badge = "🧠 Enabled (16k Budget)" if persona.get("thinking_enabled") else "⚡ Disabled"
+                thinking_badge = "🧠 Requested (model dependent)" if persona.get("thinking_enabled") else "⚡ Disabled"
 
                 embed = discord.Embed(
                     title="🤖 Zauq (ذوق) — System Specifications & Active Configuration",
                     description=(
-                        f"**Engine:** `{engine.get('name', 'Zauq')}` v`{engine.get('version', '3.2.5')}` • `{engine.get('license', 'Apache 2.0')}`\n"
+                        f"**Engine:** `{engine.get('name', 'Zauq')}` v`{engine.get('version', ZAUQ_VERSION)}` • `{engine.get('license', 'Apache 2.0')}`\n"
                         f"**Architect:** `{engine.get('creator', 'Syed Muhammad Hassan / AgenticEra Systems')}`\n"
                         f"**Channel:** <#{channel_id}>"
                     ),
@@ -67,7 +68,7 @@ class InfoSlash(commands.Cog):
 
                 # 1. Active Model & Routing
                 model_field_val = (
-                    f"• **Tier:** Tier {tier} (Cloud Primary)\n"
+                    f"• **Tier:** Tier {tier}\n"
                     f"• **Provider:** {provider_name}\n"
                     f"• **Active Model:** `{model_name}`\n"
                     f"• **Scope:** {scope_badge}"
@@ -88,7 +89,7 @@ class InfoSlash(commands.Cog):
                     f"• **Input Capacity:** `{limits.get('input_tokens_max', 30000):,} Tokens` (~120k chars)\n"
                     f"• **Output Generation:** `{limits.get('output_tokens_max', 65536):,} Tokens` (~250k chars)\n"
                     f"• **Working Context:** Last `{limits.get('history_window', 8)} messages`\n"
-                    f"• **Sandbox Bounds:** `{limits.get('sandbox_timeout_s', 5.0)}s timeout` • `{limits.get('sandbox_memory', '256m')}` • `{limits.get('sandbox_cpus', '0.5')} CPU`"
+                    f"• **Sandbox Bounds:** `{limits.get('sandbox_timeout_s', settings.SANDBOX_DEFAULT_TIMEOUT_SECONDS)}s timeout` • `{limits.get('sandbox_memory', '256m')}` • `{limits.get('sandbox_cpus', '0.5')} CPU`"
                 )
                 embed.add_field(name="📊 Context, Memory & Sandbox Bounds", value=limits_field_val, inline=False)
 

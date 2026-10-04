@@ -1,19 +1,10 @@
-"""Bounded Agent Runtime for Zauq v4.
-
-Executes a bounded, reliable tool loop strictly governed by:
-- Normal requests: max 4 tool steps
-- Deep search: max 6 tool steps
-- Hard maximum: 8 tool steps
-- Duplicate call guard (loop detection): blocks repeating same tool + same arguments
-- Structured error handling: tool failures become observations, avoiding crashes
-- Direct answer shortcut: queries without tool need make 0 tool calls
-"""
-
 from __future__ import annotations
 import json
 import logging
 import time
 import uuid
+import hashlib
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
@@ -25,8 +16,9 @@ from backend.agent.limits import (
 )
 from backend.agent.types import AgentModelTurn, ToolCall, ToolResultMessage
 from backend.config import settings
+from backend.agent.deadlines import bounded_runtime
 from backend.models.router import model_router, ModelRouter
-from backend.tools.base import ToolSpec
+from backend.tools.base import ToolSpec, ToolResult
 from backend.tools.executor import tool_executor, ToolExecutor
 from backend.security.sanitizer import sanitize_secrets
 from backend.security.prompt_guard import PROMPT_INJECTION_DIRECTIVE, fence_tool_data
@@ -92,6 +84,7 @@ class AgentRunResult:
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     agent_run_id: Optional[str] = None
+    incomplete: bool = False
 
 
 class AgentRuntime:
@@ -105,6 +98,7 @@ class AgentRuntime:
         self.router = router or model_router
         self.executor = executor or tool_executor
 
+    @bounded_runtime
     async def run(
         self,
         messages: List[Dict[str, Any]],
@@ -180,16 +174,30 @@ class AgentRuntime:
 
         # 1. Initialize budget
         if max_steps is None:
-            max_steps = DEEP_MAX_TOOL_STEPS if deep_search else NORMAL_MAX_TOOL_STEPS
-        effective_max = min(max_steps, GLOBAL_MAX_TOOL_STEPS)
-        budget = AgentBudget(max_tool_steps=effective_max)
+            max_steps = settings.AGENT_DEEP_MAX_TOOL_STEPS if deep_search else settings.AGENT_MAX_TOOL_STEPS
+        configured_max = settings.AGENT_DEEP_MAX_TOOL_STEPS if deep_search else settings.AGENT_MAX_TOOL_STEPS
+        effective_max = max(0, min(max_steps, configured_max, GLOBAL_MAX_TOOL_STEPS))
+        budget = AgentBudget(max_tool_steps=effective_max,
+                             max_search_calls=3 if deep_search else 2,
+                             max_pages_fetched=5 if deep_search else 3,
+                             max_sandbox_calls=1 + max(0, min(settings.AUTO_CODE_REPAIR_ATTEMPTS, 1)))
 
-        working_messages: List[Dict[str, Any]] = [dict(m) for m in messages]
+        working_messages: List[Dict[str, Any]] = copy.deepcopy(messages)
+        tools = list(tools)
+        selected_specs = {t.name:t for t in tools}
         tool_traces: List[Dict[str, Any]] = []
         call_signatures_seen: Set[str] = set()
         model_turns = 0
         code_repair_attempts_used = 0
         loop_detected = False
+        def partial_result(text):
+            return AgentRunResult(final_response=sanitize_secrets(text), tool_trace=tool_traces,
+                                  tool_steps=budget.tool_steps_used, model_turns=model_turns,
+                                  search_calls=budget.search_calls_used, pages_fetched=budget.pages_fetched_used,
+                                  sandbox_calls=budget.sandbox_calls_used, mcp_calls=budget.mcp_calls_used,
+                                  tool_failures=budget.tool_failures_used, duration_ms=int((time.monotonic()-start_time)*1000),
+                                  input_tokens=total_input_tokens, output_tokens=total_output_tokens,
+                                  agent_run_id=agent_run_id, incomplete=True)
 
         logger.debug(
             f"Starting AgentRuntime with provider='{provider}', model='{model_name}', "
@@ -200,7 +208,8 @@ class AgentRuntime:
         while not budget.is_exhausted():
             model_turns += 1
 
-            turn: AgentModelTurn = await self.router.generate_agent_turn(
+            try:
+                turn: AgentModelTurn = await self.router.generate_agent_turn(
                 messages=working_messages,
                 tools=tools,
                 provider=provider,
@@ -209,7 +218,13 @@ class AgentRuntime:
                 temperature=temperature,
                 media_parts=media_parts,
                 thinking_enabled=thinking_enabled,
-            )
+                )
+            except Exception:
+                if tool_traces:
+                    return partial_result('The selected provider failed after tool activity. The run stopped without replaying actions; completed tool results are shown in the trace.')
+                raise
+            if len(turn.tool_calls) > GLOBAL_MAX_TOOL_STEPS:
+                return partial_result('The model requested too many simultaneous tool calls. No calls from that batch were executed.')
 
             # Accumulate token metrics if provider reports usage
             in_t, out_t = extract_turn_usage(turn.raw_metadata)
@@ -246,13 +261,15 @@ class AgentRuntime:
                 "role": "assistant",
                 "content": turn.text or "",
                 "tool_calls": turn.tool_calls,
+                '_provider_continuation':copy.deepcopy(turn.provider_continuation),
             })
 
             # Process each requested tool call
             for call in turn.tool_calls:
-                if budget.is_exhausted():
-                    logger.warning("Budget exhausted mid-turn. Stopping further tool calls.")
-                    break
+                from backend.tools.aliases import canonical_to_alias
+                matching = next((t for t in tools if call.name in (t.name, canonical_to_alias(t.name))), None)
+                if matching:
+                    call.name = matching.name
 
                 # Signature for loop detection (same tool + same arguments)
                 try:
@@ -263,7 +280,7 @@ class AgentRuntime:
 
                 # ── Loop Detection ───────────────────────────────────────────
                 if call_sig in call_signatures_seen:
-                    logger.warning(f"Loop detected: duplicate tool call '{call_sig}'. Blocking execution.")
+                    logger.warning('Duplicate call blocked tool=%s digest=%s', call.name, hashlib.sha256(call_sig.encode()).hexdigest()[:12])
                     loop_detected = True
                     budget.tool_failures_used += 1
                     tool_traces.append(
@@ -284,9 +301,11 @@ class AgentRuntime:
                             tool_name=call.name,
                             content=error_observation,
                             is_error=True,
+                            provider_call_id=call.provider_call_id,
                         ).to_dict()
                     )
-                    budget.tool_steps_used += 1
+                    if not budget.is_exhausted():
+                        budget.tool_steps_used += 1
                     continue
 
                 call_signatures_seen.add(call_sig)
@@ -298,22 +317,36 @@ class AgentRuntime:
                     "allow_code_exec": allow_code_exec,
                     "agent_run_id": agent_run_id,
                     "tool_call_id": call.id,
+                    'allowed_tools':{t.name for t in tools},
+                    'automatic':True,
+                    'auto_code_test_mode':auto_code_test_mode,
                 }
                 if guild_id is not None:
                     exec_kwargs["guild_id"] = guild_id
-                tool_res = await self.executor.execute(**exec_kwargs)
-
-                budget.tool_steps_used += 1
-                if call.name == "web.search":
-                    budget.search_calls_used += 1
-                elif call.name == "web.fetch":
-                    budget.pages_fetched_used += 1
-                elif call.name == "code.execute":
+                blocked = not matching or budget.is_exhausted()
+                blocked = blocked or (call.name == 'web.search' and not budget.can_search())
+                blocked = blocked or (call.name == 'web.fetch' and not budget.can_fetch_page())
+                blocked = blocked or (call.name == 'code.execute' and (not budget.can_use_sandbox() or not allow_code_exec or auto_code_test_mode == 'off'))
+                blocked = blocked or (matching is not None and matching.source == 'mcp' and not budget.can_use_mcp())
+                if blocked:
+                    tool_res = ToolResult(call.name, False, error='Request policy or resource budget prohibits this call')
+                else:
+                    tool_res = await self.executor.execute(**exec_kwargs)
+                if not budget.is_exhausted():
+                    budget.tool_steps_used += 1
+                dispatched = not blocked and tool_res.metadata.get('dispatched', True)
+                if dispatched and call.name == "web.search":
+                    content = tool_res.content if isinstance(tool_res.content, dict) else {}
+                    budget.search_calls_used += content.get('search_calls', int(not content.get('from_cache', False)))
+                elif dispatched and call.name == "web.fetch":
+                    budget.page_fetch_attempts += 1
+                    budget.pages_fetched_used += int(tool_res.success)
+                elif dispatched and call.name == "code.execute":
                     budget.sandbox_calls_used += 1
-                elif call.name.startswith("mcp."):
+                elif dispatched and matching and matching.source == 'mcp':
                     budget.mcp_calls_used += 1
 
-                if not tool_res.success:
+                if not tool_res.success and not tool_res.metadata.get('requires_confirmation'):
                     budget.tool_failures_used += 1
 
                 pending_action_id = None
@@ -322,7 +355,7 @@ class AgentRuntime:
                 if requires_conf:
                     try:
                         from backend.actions.service import action_service
-                        spec_obj = self.registry.get(call.name) if hasattr(self, "registry") else None
+                        spec_obj = selected_specs.get(call.name)
                         action_risk = getattr(spec_obj, "risk", "write") if spec_obj else "write"
                         act = await action_service.create_action(
                             channel_id=channel_id or "unknown",
@@ -340,8 +373,8 @@ class AgentRuntime:
                             "Explain what action was prepared and ask the user to approve or deny using the confirmation buttons.]"
                         )
                     except Exception as act_err:
-                        logger.warning(f"Failed to create pending action: {act_err}")
-                        obs_content = f"Tool '{call.name}' requires confirmation, but failed to create action ticket: {act_err}"
+                        logger.warning('Failed to create pending action (%s)', type(act_err).__name__)
+                        obs_content = f"Tool '{call.name}' requires confirmation, but action storage is unavailable. Nothing was executed."
                 elif tool_res.success:
                     obs_content = tool_res.as_text()
                 else:
@@ -365,7 +398,7 @@ class AgentRuntime:
                         tool=call.name,
                         success=tool_res.success,
                         duration_ms=tool_res.duration_ms,
-                        error=tool_res.error,
+                        error=sanitize_secrets(tool_res.error),
                         requires_confirmation=requires_conf,
                         action_id=pending_action_id,
                     ).to_dict()
@@ -376,14 +409,13 @@ class AgentRuntime:
                     is_failure = not tool_res.success
                     if isinstance(tool_res.content, dict) and tool_res.content.get("exit_code", 0) != 0:
                         is_failure = True
-                    if is_failure:
-                        code_repair_attempts_used += 1
-                        if code_repair_attempts_used >= settings.AUTO_CODE_REPAIR_ATTEMPTS:
-                            tools = [t for t in tools if t.name != "code.execute"]
-                            obs_content += (
-                                f"\n[Notice: Maximum {settings.AUTO_CODE_REPAIR_ATTEMPTS} code repair attempt reached. "
-                                "Do not retry code execution. Please provide your final answer explaining the issue honestly.]"
-                            )
+                    repairs = max(0, min(settings.AUTO_CODE_REPAIR_ATTEMPTS, 1))
+                    if budget.sandbox_calls_used >= 1:
+                        if not is_failure or budget.sandbox_calls_used >= 1 + repairs:
+                            tools = [t for t in tools if t.name != 'code.execute']
+                            obs_content += '\n[Sandbox verification finished; no further code execution is permitted.]'
+                        else:
+                            obs_content += '\n[One corrected verification attempt is available. Explain the observed failure honestly.]'
 
                 working_messages.append(
                     ToolResultMessage(
@@ -391,6 +423,7 @@ class AgentRuntime:
                         tool_name=call.name,
                         content=obs_content,
                         is_error=not tool_res.success,
+                        provider_call_id=call.provider_call_id,
                     ).to_dict()
                 )
 
@@ -400,7 +433,8 @@ class AgentRuntime:
             f"Requesting final synthesis (agent_run={agent_run_id})."
         )
         model_turns += 1
-        final_answer = await self.router.generate(
+        try:
+            final_answer = await self.router.generate(
             messages=working_messages,
             provider=provider,
             model_name=model_name,
@@ -408,7 +442,11 @@ class AgentRuntime:
             temperature=temperature,
             media_parts=media_parts,
             thinking_enabled=thinking_enabled,
-        )
+            )
+        except Exception:
+            if tool_traces:
+                return partial_result('The provider could not synthesize the completed tool results. No actions were replayed.')
+            raise
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         return AgentRunResult(

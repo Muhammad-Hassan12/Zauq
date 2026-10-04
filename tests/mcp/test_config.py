@@ -86,6 +86,7 @@ def test_load_mcp_config_invalid_transport_skipped(tmp_path):
             },
             {
                 "id": "good-http",
+                "allowed_guild_ids": ['guild'],
                 "transport": "streamable_http",
                 "url": "https://good.mcp/v1",
             }
@@ -104,7 +105,7 @@ def test_load_mcp_config_max_servers_enforcement(tmp_path, monkeypatch):
 
     config_data = {
         "servers": [
-            {"id": f"srv_{i}", "transport": "streamable_http", "url": f"https://srv{i}.mcp"}
+            {"id": f"srv_{i}", "transport": "streamable_http", "url": f"https://srv{i}.mcp", "allowed_guild_ids":['guild']}
             for i in range(5)
         ]
     }

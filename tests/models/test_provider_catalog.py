@@ -89,7 +89,8 @@ class TestProviderCatalog:
 
         deepseek_models = get_models_for_provider("deepseek")
         assert len(deepseek_models) >= 2
-        assert "deepseek-chat" in deepseek_models
+        assert 'deepseek-flash' in deepseek_models
+        assert 'deepseek-chat' not in deepseek_models  # Retired by the provider.
 
     def test_list_providers_returns_all(self):
         providers = list_providers()

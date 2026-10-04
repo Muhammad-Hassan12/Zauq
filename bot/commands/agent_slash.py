@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.api import BACKEND_URL, api_client
+from bot.auth import check_admin_authorization, make_denied_embed
 
 logger = logging.getLogger("zauq.bot.commands.agent")
 
@@ -60,11 +61,9 @@ class AgentToolsPaginationView(discord.ui.View):
             server_id = t.get("server_id")
             desc = t.get("description", "No description provided.")
 
-            # Tag formatting
             origin_tag = f"mcp:{server_id}" if server_id else source
             badge = f"`[{risk}]` • `{origin_tag}`"
             
-            # Format value
             val_text = desc[:140] + ("..." if len(desc) > 140 else "")
             embed.add_field(
                 name=f"`{name}` {badge}",
@@ -143,7 +142,7 @@ class AgentSlash(commands.Cog):
 
         try:
             async with api_client(timeout=5.0) as client:
-                res = await client.get(f"{BACKEND_URL}/api/agent/status")
+                res = await client.get(f"{BACKEND_URL}/api/agent/status",params={'channel_id':str(interaction.channel_id),'guild_id':str(interaction.guild_id) if interaction.guild_id else ''})
 
             if res.status_code != 200:
                 await interaction.followup.send(
@@ -157,7 +156,7 @@ class AgentSlash(commands.Cog):
             max_steps = data.get("max_tool_steps", 4)
             deep_steps = data.get("deep_max_tool_steps", 6)
             search_prov = data.get("web_search_provider", "serper").capitalize()
-            auto_code = str(data.get("auto_code_test_default", "auto")).upper()
+            auto_code = str(data.get("auto_code_test_mode", "off")).upper()
             mcp_enabled = data.get("mcp_enabled", False)
             mcp_conn = data.get("mcp_servers_connected", 0)
             mcp_tot = data.get("mcp_servers_total", 0)
@@ -268,6 +267,21 @@ class AgentSlash(commands.Cog):
                 f"❌ Error communicating with backend tool service: {e}",
                 ephemeral=True,
             )
+
+    @agent_group.command(name='enable', description='Enable or disable the agent for this channel or server')
+    @app_commands.choices(scope=[app_commands.Choice(name='Channel',value='channel'),app_commands.Choice(name='Server',value='server')])
+    async def agent_enable(self, interaction: discord.Interaction, enabled: bool, scope: app_commands.Choice[str] = None):
+        await interaction.response.defer(ephemeral=True)
+        if not await check_admin_authorization(interaction):
+            await interaction.followup.send(embed=make_denied_embed(),ephemeral=True)
+            return
+        async with api_client(timeout=10) as client:
+            response=await client.post(f'{BACKEND_URL}/api/agent/config',json={'feature':'agent','enabled':enabled,'scope':scope.value if scope else 'channel','channel_id':str(interaction.channel_id),'guild_id':str(interaction.guild_id) if interaction.guild_id else None})
+        if response.status_code != 200:
+            await interaction.followup.send('Configuration could not be saved. Check backend availability and migrations.',ephemeral=True)
+            return
+        master=response.json().get('master_enabled')
+        await interaction.followup.send(f'Agent preference saved: {"enabled" if enabled else "disabled"}. Global master switch: {"on" if master else "off"}.',ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

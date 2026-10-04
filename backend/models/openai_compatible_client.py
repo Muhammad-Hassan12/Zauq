@@ -1,3 +1,4 @@
+from backend.memory.usage import record_usage
 import httpx
 import json
 import logging
@@ -11,7 +12,8 @@ from backend.tools.aliases import canonical_to_alias
 logger = logging.getLogger("zauq.openai_client")
 
 class OpenAICompatibleClient:
-    def __init__(self, base_url: str, api_key: str = "", default_model: str = "llama3.3-70b-instruct"):
+    def __init__(self, base_url: str, api_key: str = "", default_model: str = "llama3.3-70b-instruct", provider_id: str = "openai_compatible"):
+        self.provider_id = provider_id
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.default_model = default_model
@@ -29,14 +31,6 @@ class OpenAICompatibleClient:
         thinking_enabled: bool = False
     ) -> List[Dict[str, Any]]:
         effective_system_prompt = system_prompt or ""
-        if thinking_enabled:
-            thinking_directive = (
-                "\n\n[Reasoning Directive]: Engage in deep, multi-phase systematic reasoning, "
-                "thoroughly analyzing edge cases, performance trade-offs, and structural constraints "
-                "before formulating your final polished response."
-            )
-            effective_system_prompt = (effective_system_prompt + thinking_directive).strip()
-
         formatted: List[Dict[str, Any]] = []
         if effective_system_prompt:
             formatted.append({"role": "system", "content": effective_system_prompt})
@@ -44,8 +38,12 @@ class OpenAICompatibleClient:
         for raw_msg in messages:
             msg = raw_msg.to_dict() if isinstance(raw_msg, ToolResultMessage) else raw_msg
             role = msg.get("role", "user")
+            continuation = msg.get('_provider_continuation', {})
+            if role in ('assistant', 'model') and continuation.get('provider') == 'openai_compatible':
+                import copy
+                formatted.append(copy.deepcopy(continuation['content']))
+                continue
 
-            # Tool execution result
             if role == "tool":
                 call_id = msg.get("tool_call_id", "")
                 name = msg.get("tool_name") or msg.get("name", "")
@@ -58,7 +56,6 @@ class OpenAICompatibleClient:
                 })
                 continue
 
-            # Assistant turn with prior tool calls
             if role in ["assistant", "model"] and msg.get("tool_calls"):
                 raw_calls = []
                 for tc in msg.get("tool_calls", []):
@@ -101,7 +98,6 @@ class OpenAICompatibleClient:
         model = model_name or self.default_model
         formatted_messages = self._format_messages(messages, system_prompt, thinking_enabled)
 
-        # Allow generous output tokens for large code/notebook generation
         max_output = 32768 if thinking_enabled else 16384
 
         payload = {
@@ -118,6 +114,7 @@ class OpenAICompatibleClient:
                 raise RuntimeError(f"OpenAI-Compatible API Error ({response.status_code}) from {self.base_url} for model '{model}': {response.text}")
 
             data = response.json()
+            record_usage(self.provider_id, payload.get("model", self.default_model), data)
             try:
                 raw_text = data["choices"][0]["message"]["content"]
                 return sanitize_response_output(raw_text)
@@ -158,6 +155,7 @@ class OpenAICompatibleClient:
                 raise RuntimeError(f"OpenAI-Compatible Agent Turn Error ({response.status_code}) from {self.base_url} for model '{model}': {response.text}")
 
             data = response.json()
+            record_usage(self.provider_id, payload.get("model", self.default_model), data)
             try:
                 choice = data["choices"][0]["message"]
                 raw_content = choice.get("content")
@@ -183,7 +181,8 @@ class OpenAICompatibleClient:
                 return AgentModelTurn(
                     text=clean_text if clean_text else None,
                     tool_calls=tool_calls,
-                    raw_metadata=data
+                    raw_metadata=data,
+                    provider_continuation={'provider':'openai_compatible','content':choice},
                 )
             except (KeyError, IndexError) as e:
                 raise RuntimeError(f"Unexpected response format from {self.base_url}: {data} ({e})")
@@ -199,19 +198,7 @@ class OpenAICompatibleClient:
         url = f"{self.base_url}/chat/completions"
         model = model_name or self.default_model
 
-        effective_system_prompt = system_prompt or ""
-        if thinking_enabled:
-            thinking_directive = (
-                "\n\n[Reasoning Directive]: Engage in deep, multi-phase systematic reasoning, "
-                "thoroughly analyzing edge cases, performance trade-offs, and structural constraints "
-                "before formulating your final polished response."
-            )
-            effective_system_prompt = (effective_system_prompt + thinking_directive).strip()
-
-        formatted_messages = []
-        if effective_system_prompt:
-            formatted_messages.append({"role": "system", "content": effective_system_prompt})
-        formatted_messages.extend(messages)
+        formatted_messages = self._format_messages(messages, system_prompt, thinking_enabled)
 
         max_output = 32768 if thinking_enabled else 16384
 

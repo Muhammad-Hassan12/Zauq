@@ -17,7 +17,9 @@ async def test_sandbox_timeout_triggers_cleanup():
     """Verify that a timeout triggers container kill and explicit docker rm -f cleanup."""
     mock_proc = AsyncMock()
     # communicate() raises TimeoutError
-    mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    mock_proc.stdout.read = AsyncMock(side_effect=asyncio.TimeoutError())
+    mock_proc.stderr.read = AsyncMock(return_value=b'')
+    mock_proc.returncode = 0
     mock_proc.kill = AsyncMock()
     mock_proc.wait = AsyncMock()
 

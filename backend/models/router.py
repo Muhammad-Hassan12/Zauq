@@ -22,7 +22,7 @@ class ModelRouter:
         self.do_client = OpenAICompatibleClient(
             base_url="https://inference.do-ai.run/v1",
             api_key=settings.DO_MODEL_ACCESS_KEY,
-            default_model="llama3.3-70b-instruct"
+            default_model="llama3.3-70b-instruct", provider_id="digitalocean"
         )
         self.anthropic_client = AnthropicClient()
         self.qwen_client = QwenClient()
@@ -35,7 +35,7 @@ class ModelRouter:
         return OpenAICompatibleClient(
             base_url=base_url,
             api_key="",
-            default_model="qwen3.5:4b"
+            default_model="qwen3.5:4b", provider_id="ollama"
         )
 
     def _get_kaggle_client(self) -> KaggleClient:
@@ -53,7 +53,7 @@ class ModelRouter:
             if b64_data:
                 transcript = await audio_transcriber.transcribe(b64_data, mime)
                 if transcript and not transcript.startswith("[Audio transcription"):
-                    target_msg = messages[-1]
+                    target_msg = next((m for m in reversed(messages) if m.get('role') == 'user'), messages[-1])
                     original_content = target_msg.get("content", "")
                     if original_content == "[Voice Note Audio Input]" or not original_content:
                         target_msg["content"] = transcript
@@ -84,7 +84,7 @@ class ModelRouter:
                         temperature=0.1
                     )
                     if vision_res and not vision_res.startswith("[Gemini API Error"):
-                        target_msg = messages[-1]
+                        target_msg = next((m for m in reversed(messages) if m.get('role') == 'user'), messages[-1])
                         target_msg["content"] += f"\n\n[Attached Image Visual Analysis & Transcription for '{fname}']:\n{vision_res}"
                         logger.info(f"Successfully generated vision description for {fname} via Gemini Vision fallback.")
                 except Exception as e:
@@ -99,7 +99,6 @@ class ModelRouter:
         if not last_query or len(last_query.strip()) < 3:
             return
 
-        # Phase 9: Search Deduplication Guard — skip if web evidence was already injected upstream
         evidence_markers = (
             "[Live Deep Web Research Context",
             "[Autonomous Deep Web Research Context",
@@ -135,25 +134,31 @@ class ModelRouter:
         provider: str,
         target_model: str,
         enable_search: bool,
-    ):
-        """Unified pre-processing helper: audio transcription, vision OCR fallback, search context."""
-        # 1. Audio fallback if provider/model cannot natively ingest audio
+        _seen: set | None = None,
+    ) -> set:
+        """Unified pre-processing helper: audio transcription, vision OCR fallback, search context.
+
+        Tracks already-processed provider:model pairs via the caller-supplied _seen set
+        so subsequent calls in the same request are idempotent without mutating message dicts.
+        """
+        if _seen is None:
+            _seen = set()
+        marker = f'{provider}:{target_model}'
+        if marker in _seen:
+            return _seen
         if not supports_audio(provider, target_model):
             await self._handle_audio_fallback(messages, combined_media)
-
-        # 2. Vision fallback if provider/model cannot natively accept images
         if not supports_vision(provider, target_model):
             await self._handle_vision_fallback(messages, combined_media)
-
-        # 3. Search context injection if requested
-        await self._handle_search_context(messages, enable_search)
+        _seen.add(marker)
+        return _seen
 
     def _resolve_target_model(self, provider: str, model_name: Optional[str]) -> str:
         """Resolves target model, respecting provider defaults."""
-        if model_name and model_name != "gemini-2.5-flash":
+        if model_name and model_name != settings.GEMINI_DEFAULT_MODEL:
             return model_name
         spec = get_provider(provider)
-        return spec.default_model if spec else (model_name or "gemini-2.5-flash")
+        return spec.default_model if spec else (model_name or settings.GEMINI_DEFAULT_MODEL)
 
     async def generate(
         self,
@@ -172,7 +177,7 @@ class ModelRouter:
         target_model = self._resolve_target_model(provider, model_name)
 
         if provider == "gemini":
-            target_model = model_name or "gemini-2.5-flash"
+            target_model = model_name or settings.GEMINI_DEFAULT_MODEL
             return await self.gemini_client.generate(
                 messages=messages,
                 system_prompt=system_prompt,
@@ -182,10 +187,7 @@ class ModelRouter:
                 enable_search=enable_search,
                 thinking_enabled=thinking_enabled
             )
-
-        # Run unified preprocessing pipeline for non-Gemini providers
         await self._preprocess_pipeline(messages, combined_media, provider, target_model, enable_search)
-
         if provider == "digitalocean":
             if not settings.DO_MODEL_ACCESS_KEY:
                 raise ValueError("DigitalOcean Gradient Key (DO_MODEL_ACCESS_KEY) is not configured.")
@@ -264,7 +266,6 @@ class ModelRouter:
                 yield chunk
             return
 
-        # Run unified preprocessing pipeline for non-Gemini providers
         await self._preprocess_pipeline(messages, combined_media, provider, target_model, enable_search)
 
         if provider == "digitalocean":
@@ -338,7 +339,6 @@ class ModelRouter:
         combined_media = (media_parts or []) + (image_parts or [])
         target_model = self._resolve_target_model(provider, model_name)
 
-        # Enforce capability check: unsupported providers cannot accidentally receive tool payloads
         if tools and not supports_native_tools(provider, target_model):
             raise ValueError(
                 f"Provider '{provider}' with model '{target_model}' does not support native tool calling."
@@ -357,7 +357,6 @@ class ModelRouter:
                 thinking_enabled=thinking_enabled,
             )
 
-        # Run unified preprocessing pipeline for non-Gemini providers
         await self._preprocess_pipeline(messages, combined_media, provider, target_model, enable_search=False)
 
         if provider == "anthropic":
@@ -406,4 +405,3 @@ class ModelRouter:
 
 
 model_router = ModelRouter()
-

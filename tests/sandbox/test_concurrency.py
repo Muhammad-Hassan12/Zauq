@@ -24,7 +24,9 @@ async def test_sandbox_semaphore_limits_concurrency():
         return (b"ok\n", b"")
 
     mock_proc = AsyncMock()
-    mock_proc.communicate = AsyncMock(side_effect=fake_proc_communicate)
+    mock_proc.stdout.read = AsyncMock(side_effect=[b'ok',b'',b'ok',b'',b'ok',b''])
+    mock_proc.stderr.read = AsyncMock(return_value=b'')
+    mock_proc.wait = AsyncMock(side_effect=fake_proc_communicate)
     mock_proc.returncode = 0
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):

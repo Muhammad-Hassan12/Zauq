@@ -1,16 +1,11 @@
-"""Alibaba Cloud Model Studio / Qwen Direct API Client for Zauq AI.
-
-Direct first-party connectivity to official Qwen OpenAI-compatible endpoints.
-Maintains independent provider identity, telemetry, capability mapping, and credentials.
-"""
-
+from backend.memory.usage import record_usage
 import json
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from backend.config import settings
 from backend.models.gemini_client import sanitize_response_output
-from backend.models.capabilities import supports_thinking
+from backend.models.capabilities import supports_thinking, supports_vision
 
 from backend.agent.types import AgentModelTurn, ToolCall, ToolResultMessage
 from backend.models.tool_schemas import to_openai_tools, normalize_tool_call_name
@@ -48,6 +43,7 @@ class QwenClient:
         thinking_enabled: bool = False,
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
+        media_parts: Optional[List[Dict[str, str]]] = None,
     ) -> tuple[str, Dict[str, Any]]:
         model = model_name or self.default_model
         formatted_messages: List[Dict[str, Any]] = []
@@ -58,8 +54,12 @@ class QwenClient:
         for raw_msg in messages:
             msg = raw_msg.to_dict() if isinstance(raw_msg, ToolResultMessage) else raw_msg
             role = msg.get("role", "user")
+            continuation = msg.get('_provider_continuation', {})
+            if role in ('assistant', 'model') and continuation.get('provider') == 'qwen':
+                import copy
+                formatted_messages.append(copy.deepcopy(continuation['content']))
+                continue
 
-            # 1. Tool execution result
             if role == "tool":
                 call_id = msg.get("tool_call_id", "")
                 name = msg.get("tool_name") or msg.get("name", "")
@@ -72,7 +72,6 @@ class QwenClient:
                 })
                 continue
 
-            # 2. Assistant turn with prior tool calls
             if role in ["assistant", "model"] and msg.get("tool_calls"):
                 raw_calls = []
                 for tc in msg.get("tool_calls", []):
@@ -96,12 +95,21 @@ class QwenClient:
                 })
                 continue
 
-            # 3. Standard text message
             formatted_messages.append({
                 "role": role,
                 "content": str(msg.get("content", ""))
             })
 
+        if media_parts and supports_vision('qwen', model):
+            target = next((m for m in reversed(formatted_messages) if m['role'] == 'user'), None)
+            if target:
+                blocks = [{'type':'text', 'text':str(target['content'])}]
+                for part in media_parts:
+                    mime = part.get('mime_type', 'image/png')
+                    if mime.startswith('image/') and part.get('bytes_b64'):
+                        blocks.append({'type':'image_url','image_url':{'url':f"data:{mime};base64,{part['bytes_b64']}"}})
+                target['content'] = blocks
+        thinking_enabled = thinking_enabled and supports_thinking('qwen', model)
         max_tokens = 32768 if thinking_enabled else 8192
 
         payload: Dict[str, Any] = {
@@ -112,8 +120,8 @@ class QwenClient:
             "stream": stream,
         }
 
-        if thinking_enabled and supports_thinking("qwen", model):
-            payload["enable_thinking"] = True
+        if supports_thinking('qwen', model):
+            payload['enable_thinking'] = bool(thinking_enabled)
 
         if tools:
             payload["tools"] = to_openai_tools(tools)
@@ -145,6 +153,7 @@ class QwenClient:
             thinking_enabled=thinking_enabled,
             stream=False,
             tools=tools,
+            media_parts=media_parts,
         )
 
         url = f"{self.base_url}/chat/completions"
@@ -157,6 +166,7 @@ class QwenClient:
                 )
 
             data = response.json()
+            record_usage('qwen', payload.get("model", self.default_model), data)
             try:
                 raw_text = data["choices"][0]["message"]["content"]
                 return sanitize_response_output(raw_text)
@@ -187,6 +197,7 @@ class QwenClient:
             thinking_enabled=thinking_enabled,
             stream=True,
             tools=tools,
+            media_parts=media_parts,
         )
 
         url = f"{self.base_url}/chat/completions"
@@ -237,6 +248,7 @@ class QwenClient:
             thinking_enabled=thinking_enabled,
             stream=False,
             tools=tools,
+            media_parts=media_parts,
         )
 
         url = f"{self.base_url}/chat/completions"
@@ -249,6 +261,7 @@ class QwenClient:
                 )
 
             data = response.json()
+            record_usage('qwen', payload.get("model", self.default_model), data)
             try:
                 choice = data["choices"][0]["message"]
                 raw_content = choice.get("content")
@@ -274,8 +287,8 @@ class QwenClient:
                 return AgentModelTurn(
                     text=clean_text if clean_text else None,
                     tool_calls=tool_calls,
-                    raw_metadata=data
+                    raw_metadata=data,
+                    provider_continuation={'provider':'qwen','content':choice},
                 )
             except (KeyError, IndexError) as e:
                 raise RuntimeError(f"Unexpected response format from Qwen API: {data} ({e})")
-

@@ -38,6 +38,11 @@ from backend.agent.runtime import AgentRuntime, AgentRunResult, extract_turn_usa
 from backend.agent.types import AgentModelTurn, ToolCall
 
 
+@pytest.fixture(autouse=True)
+def configured_model_rates(monkeypatch):
+    monkeypatch.setattr(settings, 'MODEL_PRICING_JSON', '{"gemini:gemini-2.5-flash":[0.075,0.30],"anthropic:claude-sonnet-4-5":[3,15]}')
+
+
 def test_estimate_provider_cost():
     """Verify cost calculation across different model pricing tiers."""
     # Gemini pricing: 0.075 / 1M in, 0.30 / 1M out
@@ -224,7 +229,7 @@ async def test_mcp_server_retry_storm_prevention():
 
     # Simulate 5 consecutive connection failures
     for i in range(5):
-        await mgr._connect_server(conn)
+        await mgr._connect_once(conn)
 
     assert conn.consecutive_failures == 5
     # Should not have active reconnect task after reaching max failures

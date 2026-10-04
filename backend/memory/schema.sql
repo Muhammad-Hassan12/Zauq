@@ -1,4 +1,4 @@
--- Supabase Schema for Zauq (AgenticEra Hybrid AI Discord Bot) v3.0
+-- Supabase Schema for Zauq v4.0 — fresh installs; existing installs use ordered migrations.
 
 -- Enable pgvector extension if not enabled
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS guild_configs (
     admin_role_id TEXT,
     moderation_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     moderation_sensitivity TEXT NOT NULL DEFAULT 'medium' CHECK (moderation_sensitivity IN ('low', 'medium', 'high')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 2. Channel Profiles
@@ -25,7 +26,9 @@ CREATE TABLE IF NOT EXISTS channel_profiles (
     system_persona_prompt TEXT,
     temperature DOUBLE PRECISION NOT NULL DEFAULT 0.7,
     allow_code_exec BOOLEAN NOT NULL DEFAULT FALSE,
+    thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     auto_code_test_mode TEXT NOT NULL DEFAULT 'off' CHECK (auto_code_test_mode IN ('off', 'auto', 'always')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -35,6 +38,7 @@ CREATE TABLE IF NOT EXISTS model_selection (
     tier INT NOT NULL CHECK (tier IN (1, 2, 3)),
     provider TEXT NOT NULL CHECK (provider IN ('gemini', 'digitalocean', 'anthropic', 'qwen', 'deepseek', 'ollama', 'kaggle')),
     model_name TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by TEXT
 );
@@ -110,6 +114,7 @@ CREATE TABLE IF NOT EXISTS scheduled_reminders (
     message TEXT NOT NULL,
     remind_at TIMESTAMPTZ NOT NULL,
     delivered BOOLEAN NOT NULL DEFAULT FALSE,
+    delivering BOOLEAN NOT NULL DEFAULT FALSE,  -- in-flight guard to prevent duplicate sends
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -130,9 +135,8 @@ CREATE TABLE IF NOT EXISTS moderation_log (
 
 CREATE INDEX IF NOT EXISTS idx_moderation_guild ON moderation_log(guild_id);
 
--- ========================================================
 -- Enable Row Level Security (RLS) & Policies
--- ========================================================
+
 ALTER TABLE guild_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE channel_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_selection ENABLE ROW LEVEL SECURITY;
@@ -145,24 +149,42 @@ ALTER TABLE moderation_log ENABLE ROW LEVEL SECURITY;
 
 -- Restrictive policies: authenticated/anon roles blocked from direct client access
 -- Backend service_role key bypasses RLS and maintains full programmatic access
+DROP POLICY IF EXISTS "Service role only on guild_configs" ON guild_configs;
 CREATE POLICY "Service role only on guild_configs" ON guild_configs FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on channel_profiles" ON channel_profiles;
 CREATE POLICY "Service role only on channel_profiles" ON channel_profiles FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on model_selection" ON model_selection;
 CREATE POLICY "Service role only on model_selection" ON model_selection FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on user_memories" ON user_memories;
 CREATE POLICY "Service role only on user_memories" ON user_memories FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on server_lore" ON server_lore;
 CREATE POLICY "Service role only on server_lore" ON server_lore FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on request_logs" ON request_logs;
 CREATE POLICY "Service role only on request_logs" ON request_logs FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on user_stats" ON user_stats;
 CREATE POLICY "Service role only on user_stats" ON user_stats FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on scheduled_reminders" ON scheduled_reminders;
 CREATE POLICY "Service role only on scheduled_reminders" ON scheduled_reminders FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Service role only on moderation_log" ON moderation_log;
 CREATE POLICY "Service role only on moderation_log" ON moderation_log FOR ALL TO authenticated USING (false);
 
+DROP POLICY IF EXISTS "Block anon on guild_configs" ON guild_configs;
 CREATE POLICY "Block anon on guild_configs" ON guild_configs FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on channel_profiles" ON channel_profiles;
 CREATE POLICY "Block anon on channel_profiles" ON channel_profiles FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on model_selection" ON model_selection;
 CREATE POLICY "Block anon on model_selection" ON model_selection FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on user_memories" ON user_memories;
 CREATE POLICY "Block anon on user_memories" ON user_memories FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on server_lore" ON server_lore;
 CREATE POLICY "Block anon on server_lore" ON server_lore FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on request_logs" ON request_logs;
 CREATE POLICY "Block anon on request_logs" ON request_logs FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on user_stats" ON user_stats;
 CREATE POLICY "Block anon on user_stats" ON user_stats FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on scheduled_reminders" ON scheduled_reminders;
 CREATE POLICY "Block anon on scheduled_reminders" ON scheduled_reminders FOR ALL TO anon USING (false);
+DROP POLICY IF EXISTS "Block anon on moderation_log" ON moderation_log;
 CREATE POLICY "Block anon on moderation_log" ON moderation_log FOR ALL TO anon USING (false);
 
 -- Vector similarity search RPC function for server_lore
@@ -197,9 +219,7 @@ BEGIN
 END;
 $$;
 
--- ========================================================
 -- v3.1 Migrations (additive only — safe to re-run)
--- ========================================================
 
 -- M1: Thinking mode toggle per channel
 ALTER TABLE channel_profiles
@@ -256,9 +276,8 @@ CREATE INDEX IF NOT EXISTS idx_user_memories_importance
 CREATE INDEX IF NOT EXISTS idx_user_memories_last_accessed
     ON user_memories(last_accessed_at ASC);
 
--- ========================================================
--- v4.0 Phase 7: Pending Actions (Human-in-the-Loop)
--- ========================================================
+-- v4.0: Pending Actions (Human-in-the-Loop)
+
 CREATE TABLE IF NOT EXISTS pending_actions (
     action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     guild_id TEXT,
@@ -277,19 +296,18 @@ CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (u
 CREATE INDEX IF NOT EXISTS idx_pending_actions_expires_at ON pending_actions (expires_at);
 
 ALTER TABLE pending_actions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role only on pending_actions" ON pending_actions;
 CREATE POLICY "Service role only on pending_actions" ON pending_actions FOR ALL TO authenticated USING (false);
+DROP POLICY IF EXISTS "Block anon on pending_actions" ON pending_actions;
 CREATE POLICY "Block anon on pending_actions" ON pending_actions FOR ALL TO anon USING (false);
 
--- ========================================================
--- v4.0 Additive Migrations for Existing Databases (Phase 14)
--- Safe to re-run on production deployments without data loss.
--- ========================================================
+-- v4.0 Additive Migrations for Existing Databases
 
--- M5: Auto code test mode toggle per channel (Phase 5)
+-- M5: Auto code test mode toggle per channel
 ALTER TABLE channel_profiles
     ADD COLUMN IF NOT EXISTS auto_code_test_mode TEXT NOT NULL DEFAULT 'off' CHECK (auto_code_test_mode IN ('off', 'auto', 'always'));
 
--- M6: Observability, token usage, cost audit, and agent metrics (Phase 11)
+-- M6: Observability, token usage, cost audit, and agent metrics
 ALTER TABLE request_logs
     ADD COLUMN IF NOT EXISTS tool_steps INT DEFAULT 0,
     ADD COLUMN IF NOT EXISTS search_calls INT DEFAULT 0,
@@ -303,3 +321,95 @@ ALTER TABLE request_logs
     ADD COLUMN IF NOT EXISTS estimated_cost_usd DOUBLE PRECISION,
     ADD COLUMN IF NOT EXISTS request_id TEXT,
     ADD COLUMN IF NOT EXISTS agent_run_id TEXT;
+
+-- Included migration: 004_v4_rollout.sql
+ALTER TABLE channel_profiles ADD COLUMN IF NOT EXISTS agent_runtime_enabled BOOLEAN;
+ALTER TABLE channel_profiles ADD COLUMN IF NOT EXISTS mcp_enabled BOOLEAN;
+ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS agent_runtime_enabled BOOLEAN;
+ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS mcp_enabled BOOLEAN;
+
+-- Included migration: 005_v4_metrics.sql
+ALTER TABLE request_logs
+    ADD COLUMN IF NOT EXISTS tool_steps INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS search_calls INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS pages_fetched INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS sandbox_calls INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS mcp_calls INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS tool_failures INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS agent_duration_ms INT,
+    ADD COLUMN IF NOT EXISTS input_tokens INT,
+    ADD COLUMN IF NOT EXISTS output_tokens INT,
+    ADD COLUMN IF NOT EXISTS estimated_cost_usd DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS request_id TEXT,
+    ADD COLUMN IF NOT EXISTS agent_run_id TEXT,
+    ADD COLUMN IF NOT EXISTS provider_usage JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ok';
+
+CREATE OR REPLACE FUNCTION v4_metrics_summary(requested_guild TEXT DEFAULT NULL)
+RETURNS JSONB LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $$
+WITH logs AS (SELECT * FROM request_logs WHERE requested_guild IS NULL OR guild_id = requested_guild),
+providers AS (SELECT upper(provider) AS provider, count(*) AS n FROM logs GROUP BY provider)
+SELECT jsonb_build_object(
+    'total_requests', count(*), 'avg_latency_ms', COALESCE(round(avg(response_time_ms), 1), 0),
+    'provider_breakdown', COALESCE((SELECT jsonb_object_agg(provider,n) FROM providers), '{}'::jsonb),
+    'total_tool_steps', COALESCE(sum(tool_steps),0),
+    'total_search_calls', COALESCE(sum(search_calls),0),
+    'total_pages_fetched', COALESCE(sum(pages_fetched),0),
+    'total_sandbox_calls', COALESCE(sum(sandbox_calls),0),
+    'total_mcp_calls', COALESCE(sum(mcp_calls),0),
+    'total_tool_failures', COALESCE(sum(tool_failures),0),
+    'total_input_tokens', COALESCE(sum(input_tokens),0),
+    'total_output_tokens', COALESCE(sum(output_tokens),0),
+    'unknown_usage_requests', count(*) FILTER (WHERE input_tokens IS NULL OR output_tokens IS NULL),
+    'known_estimated_cost_usd', COALESCE(sum(estimated_cost_usd),0),
+    'unknown_cost_requests', count(*) FILTER (WHERE estimated_cost_usd IS NULL),
+    'total_estimated_cost_usd', CASE WHEN count(*) FILTER (WHERE estimated_cost_usd IS NULL) > 0 THEN NULL ELSE COALESCE(sum(estimated_cost_usd),0) END,
+    'window', 'all retained database requests'
+) FROM logs;
+$$;
+REVOKE ALL ON FUNCTION v4_metrics_summary(TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION v4_metrics_summary(TEXT) TO service_role;
+
+-- Included migration: 006_v4_schema_repair.sql
+-- Reconcile installations that applied the early boolean auto-test example.
+-- TRUE becomes auto (never always); explicit execution permissions stay intact.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='channel_profiles' AND column_name='auto_code_test_mode' AND data_type='boolean') THEN
+        ALTER TABLE channel_profiles DROP CONSTRAINT IF EXISTS channel_profiles_auto_code_test_mode_check;
+        ALTER TABLE channel_profiles ALTER COLUMN auto_code_test_mode DROP DEFAULT;
+        ALTER TABLE channel_profiles ALTER COLUMN auto_code_test_mode TYPE TEXT
+            USING CASE WHEN auto_code_test_mode THEN 'auto' ELSE 'off' END;
+    END IF;
+END;
+$$;
+ALTER TABLE channel_profiles ADD COLUMN IF NOT EXISTS auto_code_test_mode TEXT;
+UPDATE channel_profiles SET auto_code_test_mode='off' WHERE auto_code_test_mode IS NULL OR auto_code_test_mode NOT IN ('off','auto','always');
+ALTER TABLE channel_profiles ALTER COLUMN auto_code_test_mode SET DEFAULT 'off';
+ALTER TABLE channel_profiles ALTER COLUMN auto_code_test_mode SET NOT NULL;
+ALTER TABLE channel_profiles DROP CONSTRAINT IF EXISTS channel_profiles_auto_code_test_mode_check;
+ALTER TABLE channel_profiles ADD CONSTRAINT channel_profiles_auto_code_test_mode_check CHECK (auto_code_test_mode IN ('off','auto','always'));
+ALTER TABLE channel_profiles ADD COLUMN IF NOT EXISTS thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pending_actions ADD COLUMN IF NOT EXISTS signature TEXT;
+ALTER TABLE pending_actions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE guild_configs DROP CONSTRAINT IF EXISTS guild_configs_default_provider_check;
+ALTER TABLE guild_configs ADD CONSTRAINT guild_configs_default_provider_check CHECK (default_provider IN ('gemini','digitalocean','anthropic','qwen','deepseek','ollama','kaggle'));
+
+-- M-atomic: Atomic access_count increment for user memories (race-free reinforce_memory)
+CREATE OR REPLACE FUNCTION increment_memory_access(p_memory_id UUID)
+RETURNS void
+LANGUAGE sql
+AS $$
+    UPDATE user_memories
+       SET access_count      = access_count + 1,
+           last_accessed_at  = NOW()
+     WHERE memory_id = p_memory_id;
+$$;
+
+-- M-deliver: Add in-flight guard column to scheduled_reminders (idempotent delivery)
+ALTER TABLE scheduled_reminders ADD COLUMN IF NOT EXISTS delivering BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- M-timestamps: Consistent (created_at, updated_at) on all tables
+ALTER TABLE guild_configs      ADD COLUMN IF NOT EXISTS updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE channel_profiles   ADD COLUMN IF NOT EXISTS created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE model_selection     ADD COLUMN IF NOT EXISTS created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW();

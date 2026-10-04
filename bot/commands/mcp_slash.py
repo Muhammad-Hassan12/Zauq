@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 import httpx
 from bot.api import BACKEND_URL, api_client
-from backend.tools.registry import tool_registry
+from bot.commands.agent_slash import AgentToolsPaginationView
 
 logger = logging.getLogger("zauq.bot.commands.mcp")
 
@@ -27,7 +27,8 @@ class MCPSlash(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            res = await api_client.get(f"{BACKEND_URL}/api/mcp/status", timeout=5.0)
+            async with api_client(timeout=5.0) as client:
+                res = await client.get(f"{BACKEND_URL}/api/mcp/status")
             if res.status_code != 200:
                 await interaction.followup.send(
                     f"⚠️ Failed to fetch MCP status: Backend returned HTTP {res.status_code}",
@@ -84,39 +85,20 @@ class MCPSlash(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         guild_id = str(interaction.guild_id) if interaction.guild_id else None
 
-        # Filter registered tools for MCP source and current guild scoping
-        mcp_specs = [
-            t for t in tool_registry.list_tools(enabled_only=True)
-            if t.source == "mcp"
-        ]
-
-        if guild_id:
-            mcp_specs = [
-                t for t in mcp_specs
-                if not t.allowed_guild_ids or guild_id in t.allowed_guild_ids
-            ]
-
-        embed = discord.Embed(
-            title="🛠️ Registered MCP Tools",
-            color=0x3498db,
-        )
-
-        if not mcp_specs:
-            embed.description = "No MCP tools are currently registered or accessible in this guild."
-        else:
-            embed.description = f"Found **{len(mcp_specs)}** active MCP tool(s) for this guild:"
-            for spec in mcp_specs[:15]:  # Discord embed limit protection
-                embed.add_field(
-                    name=f"`{spec.name}` ({spec.risk})",
-                    value=f"{spec.description[:120]}\n*Origin: Server `{spec.server_id}`*",
-                    inline=False,
-                )
-            if len(mcp_specs) > 15:
-                embed.set_footer(text=f"Showing 15 of {len(mcp_specs)} tools • Zauq v4")
-            else:
-                embed.set_footer(text="Zauq v4 • Model Context Protocol Client Layer")
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        try:
+            async with api_client(timeout=5) as client:
+                response=await client.get(f'{BACKEND_URL}/api/agent/tools',params={'guild_id':guild_id or ''})
+            if response.status_code != 200:
+                await interaction.followup.send('Backend tool discovery is unavailable.',ephemeral=True)
+                return
+            tools=[tool for tool in response.json() if tool.get('source')=='mcp']
+            if not tools:
+                await interaction.followup.send('No approved MCP tools are available in this guild.',ephemeral=True)
+                return
+            view=AgentToolsPaginationView(tools,interaction.user.id,interaction.guild.name if interaction.guild else None)
+            view.message=await interaction.followup.send(embed=view.build_page_embed(),view=view,ephemeral=True)
+        except Exception:
+            await interaction.followup.send('Could not contact backend tool discovery.',ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

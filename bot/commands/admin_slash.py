@@ -33,7 +33,6 @@ class AdminSlash(commands.Cog):
                 embed.add_field(name="Server Lore Entries", value=f"**{data.get('server_lore', 0)}**", inline=True)
                 embed.add_field(name="Data Source", value=f"`{data.get('source', 'backend').upper()}`", inline=True)
 
-                # Also fetch general metrics
                 metrics_res = await client.get(f"{BACKEND_URL}/api/admin/metrics?guild_id={guild_id}")
                 if metrics_res.status_code == 200:
                     metrics = metrics_res.json()

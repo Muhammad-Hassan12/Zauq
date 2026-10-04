@@ -1,7 +1,4 @@
-"""Zauq Tools module.
-
-Exports central tool registry and automatically loads native tools.
-"""
+"""Zauq Tools module."""
 
 from backend.tools.base import ToolSpec, ToolResult, RiskLevel
 from backend.tools.registry import ToolRegistry, tool_registry

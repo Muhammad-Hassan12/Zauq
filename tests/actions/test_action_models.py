@@ -66,7 +66,7 @@ def test_action_request_schemas():
     assert create_req.ttl_seconds == 120
     assert create_req.arguments == {"branch": "feature"}
 
-    approve_req = ActionApproveRequest(user_id="u1", is_admin=True)
+    approve_req = ActionApproveRequest(user_id="u1", is_admin=True, signature='a'*64)
     assert approve_req.is_admin is True
 
     deny_req = ActionDenyRequest(user_id="u1")

@@ -1,6 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "description": "Zauq v4 Model Context Protocol (MCP) Server Configuration Example",
+  "description": "Disabled templates. Supply real endpoints, explicit guild scope and verified allowed_tools before enabling.",
   "servers": [
     {
       "id": "github",
@@ -13,13 +12,23 @@
       "allowed_guild_ids": [
         "123456789012345678"
       ],
-      "default_risk": "read",
+      "default_risk": "write",
       "timeout_seconds": 15.0,
       "namespace_prefix": "github",
       "tool_risks": {
         "create_issue": "write",
-        "delete_branch": "destructive"
-      }
+        "delete_branch": "destructive",
+        "get_issue": "read"
+      },
+      "allow_global_access": false,
+      "selection_keywords": [
+        "github",
+        "repository"
+      ],
+      "allowed_tools": [
+        "get_issue",
+        "create_issue"
+      ]
     },
     {
       "id": "local-docs",
@@ -30,14 +39,25 @@
         "servers/docs_server.py"
       ],
       "env": {
-        "DOCS_DIRECTORY": "${DOCS_DIRECTORY:-./docs}"
+        "DOCS_DIRECTORY": "${DOCS_DIRECTORY}"
       },
       "allowed_guild_ids": [
         "123456789012345678"
       ],
-      "default_risk": "read",
+      "default_risk": "write",
       "timeout_seconds": 15.0,
-      "namespace_prefix": "docs"
+      "namespace_prefix": "docs",
+      "allow_global_access": false,
+      "selection_keywords": [
+        "docs",
+        "documentation"
+      ],
+      "allowed_tools": [
+        "search_docs"
+      ],
+      "tool_risks": {
+        "search_docs": "read"
+      }
     }
   ]
 }

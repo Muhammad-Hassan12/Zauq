@@ -31,6 +31,8 @@ class SearchResponse:
     category: str = "all"
     provider: str = "serper"
     from_cache: bool = False
+    error: str | None = None
+    search_calls: int = 1
 
     @property
     def urls(self) -> list[str]:
@@ -71,6 +73,7 @@ class EvidenceItem:
     source_url: str
     source_title: str
     excerpt: str
+    fetched: bool = True
 
 
 @dataclass
@@ -84,3 +87,6 @@ class ResearchResult:
     total_chars: int = 0
     degraded: bool = False
     from_cache: bool = False
+    error: str | None = None
+    search_calls: int = 0
+    pages_fetched: int = 0

@@ -1,5 +1,3 @@
-"""Zauq v4 Human-in-the-Loop Side-Effect Approval Package (Phase 7)."""
-
 from backend.actions.models import (
     PendingAction,
     ActionStatus,

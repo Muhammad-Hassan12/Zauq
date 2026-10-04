@@ -1,17 +1,3 @@
-"""Capability Router for Zauq v4.
-
-Determines the minimal, relevant tool subset for a request cheaply and deterministically
-without spending paid LLM requests on autonomous planning.
-
-Routing Rules:
-- If model provider lacks FUNCTION_CALLING capability -> returns []
-- URLs in messages or web browsing intent -> web.fetch (and web.search)
-- Web search intent or explicit search request -> web.search, web.fetch
-- Coding/execution intent (if allowed by channel policy) -> code.execute (when registered)
-- GitHub / MCP intent (when connected) -> github.*
-- Pure conversational / general reasoning -> [] (no tool overhead)
-"""
-
 from __future__ import annotations
 import re
 import logging
@@ -126,22 +112,23 @@ class CapabilityRouter:
         selected_names: set[str] = set()
 
         # 2. Check explicit search flags
-        if enable_web_search or deep_search or search_query:
+        if enable_web_search is not False and (enable_web_search or deep_search or search_query):
             selected_names.add("web.search")
             selected_names.add("web.fetch")
 
         # 3. Check for URLs in messages
-        if self.has_urls(user_text):
+        if enable_web_search is not False and self.has_urls(user_text):
             selected_names.add("web.fetch")
 
         # 4. Check for implicit web search intent
-        if self.has_search_intent(user_text):
+        if enable_web_search is not False and self.has_search_intent(user_text):
             selected_names.add("web.search")
             selected_names.add("web.fetch")
 
         # 5. Check for code execution (Phase 5 policy: allow_code_exec=True AND auto_code_test_mode != 'off')
         if allow_code_exec and auto_code_test_mode != "off":
-            if auto_code_test_mode == "always" or self.has_code_intent(user_text):
+            runnable = self.has_code_intent(user_text) or bool(re.search(r'\b(code|python|javascript|bash|script|function|algorithm)\b|```', user_text, re.I))
+            if runnable and 'pseudocode' not in user_text.lower():
                 if "code.execute" in self.registry:
                     selected_names.add("code.execute")
 
@@ -152,11 +139,17 @@ class CapabilityRouter:
                     selected_names.add(t.name)
 
         # 7. Collect ToolSpec objects from registry, enforcing guild scoping
+        for tool in self.registry.list_tools(enabled_only=True):
+            if tool.source != 'mcp':
+                continue
+            hints = tool.selection_keywords or [tool.server_id or '', tool.name.split('.')[0]]
+            if any(hint and re.search(r'\b' + re.escape(hint.lower()) + r'\b', user_text.lower()) for hint in hints):
+                selected_names.add(tool.name)
         result: List[ToolSpec] = []
         for name in sorted(selected_names):
             spec = self.registry.get(name)
             if spec and spec.enabled:
-                if spec.allowed_guild_ids:
+                if spec.allowed_guild_ids is not None:
                     if not guild_id or guild_id not in spec.allowed_guild_ids:
                         continue
                 result.append(spec)
@@ -165,7 +158,7 @@ class CapabilityRouter:
             f"CapabilityRouter selected {len(result)} tools for provider '{provider}': "
             f"{[t.name for t in result]}"
         )
-        return result
+        return result[:8]
 
 
 # Global singleton

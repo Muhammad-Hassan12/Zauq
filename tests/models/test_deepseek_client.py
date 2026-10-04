@@ -36,16 +36,17 @@ class TestDeepSeekClient:
         assert payload["temperature"] == 0.7
         assert len(payload["messages"]) == 2
 
-    def test_build_payload_thinking_mode_upgrades_to_reasoner(self):
+    def test_build_payload_thinking_preserves_selected_model(self):
         client = DeepSeekClient(api_key="sk-deepseek-test")
         model, payload = client._build_payload(
             messages=[{"role": "user", "content": "Solve math proof"}],
-            model_name="deepseek-chat",
+            model_name="deepseek-flash",
             thinking_enabled=True
         )
         # Upgrades to deepseek-reasoner and omits temperature
-        assert model == "deepseek-reasoner"
-        assert payload["model"] == "deepseek-reasoner"
+        assert model == "deepseek-flash"
+        assert payload["model"] == "deepseek-flash"
+        assert payload['thinking'] == {'type':'enabled'}
         assert "temperature" not in payload
 
     @pytest.mark.asyncio

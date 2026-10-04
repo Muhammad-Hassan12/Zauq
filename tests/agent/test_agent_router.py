@@ -58,7 +58,7 @@ async def test_agent_tools_listing_and_guild_scoping():
             tools_all = res_all.json()
             names_all = [t["name"] for t in tools_all]
             assert "test.agent_global_tool" in names_all
-            assert "test.agent_guild_tool" in names_all
+            assert "test.agent_guild_tool" not in names_all  # No guild context must not reveal scoped tools.
 
             # By default schemas are omitted for clean UX
             g_item = next(t for t in tools_all if t["name"] == "test.agent_global_tool")

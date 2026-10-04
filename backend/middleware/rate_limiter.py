@@ -1,9 +1,18 @@
+import os
 import time
 import json
+import logging
 from collections import defaultdict
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
+logger = logging.getLogger("zauq.rate_limiter")
+
+try:
+    import redis.asyncio as aioredis
+except ImportError:
+    aioredis = None
 
 # Per-endpoint rate limit overrides (guild_limit, user_limit)
 _ENDPOINT_LIMITS = {
@@ -28,8 +37,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.ip_requests = defaultdict(list)
         self.last_cleanup = time.time()
 
+        redis_url = os.getenv("REDIS_URL", "")
+        self.redis = aioredis.from_url(redis_url) if (aioredis and redis_url) else None
+
     def _cleanup_stale_keys(self, now: float):
-        if now - self.last_cleanup > 300:
+        if now - self.last_cleanup > 60:
             for store in [self.guild_requests, self.user_requests, self.ip_requests]:
                 for key in list(store.keys()):
                     store[key] = [t for t in store[key] if now - t < self.window_seconds]
@@ -48,12 +60,33 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         requests_dict[key].append(now)
         return False
 
-    async def dispatch(self, request: Request, call_next) -> Response:
-        # Only rate-limit POST requests
-        if request.method != "POST":
-            return await call_next(request)
+    async def _check_rate_limit(self, requests_dict: dict, scope_type: str, key: str, limit: int) -> bool:
+        if not key:
+            return False
+        if self.redis:
+            try:
+                now = time.time()
+                redis_key = f"rl:{scope_type}:{key}"
+                pipe = self.redis.pipeline()
+                pipe.zremrangebyscore(redis_key, 0, now - self.window_seconds)
+                pipe.zadd(redis_key, {str(now): now})
+                pipe.zcard(redis_key)
+                pipe.expire(redis_key, self.window_seconds)
+                results = await pipe.execute()
+                count = results[2]
+                return count > limit
+            except Exception as e:
+                logger.debug(f"Redis rate limiting failed, falling back: {e}")
+        return self._is_rate_limited(requests_dict, key, limit)
 
+    async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
+
+        # Rate-limit POST requests (all endpoints) and GET requests on admin paths
+        if request.method not in ("POST", "GET"):
+            return await call_next(request)
+        if request.method == "GET" and not path.startswith("/api/admin"):
+            return await call_next(request)
 
         # Determine limits for this endpoint
         if path.startswith("/api/chat"):
@@ -82,7 +115,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         except Exception:
             # Body parse failed — fall back to IP-based rate limiting
-            if self._is_rate_limited(self.ip_requests, client_ip, user_limit):
+            if await self._check_rate_limit(self.ip_requests, "ip", client_ip, user_limit):
                 return JSONResponse(
                     status_code=429,
                     content={"detail": "Rate limit exceeded. Please slow down."}
@@ -90,14 +123,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Guild-level check
-        if guild_id and self._is_rate_limited(self.guild_requests, guild_id, guild_limit):
+        if guild_id and await self._check_rate_limit(self.guild_requests, "guild", guild_id, guild_limit):
             return JSONResponse(
                 status_code=429,
                 content={"detail": f"Guild rate limit exceeded (max {guild_limit} requests/min). Please try again shortly."}
             )
 
         # User-level check
-        if user_id and self._is_rate_limited(self.user_requests, user_id, user_limit):
+        if user_id and await self._check_rate_limit(self.user_requests, "user", user_id, user_limit):
             return JSONResponse(
                 status_code=429,
                 content={"detail": f"User rate limit exceeded (max {user_limit} requests/min). Please slow down."}
@@ -105,7 +138,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # IP-level fallback check (when no user_id extracted)
         if not user_id:
-            if self._is_rate_limited(self.ip_requests, client_ip, user_limit):
+            if await self._check_rate_limit(self.ip_requests, "ip", client_ip, user_limit):
                 return JSONResponse(
                     status_code=429,
                     content={"detail": "Rate limit exceeded. Please slow down."}

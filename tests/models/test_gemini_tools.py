@@ -119,7 +119,7 @@ class TestGeminiTools:
         assert "functionCall" in contents[1]["parts"][0]
         assert contents[1]["parts"][0]["functionCall"]["name"] == "web__search"
         # Third turn: function response
-        assert contents[2]["role"] == "function"
+        assert contents[2]["role"] == "user"
         assert "functionResponse" in contents[2]["parts"][0]
         assert contents[2]["parts"][0]["functionResponse"]["name"] == "web__search"
         assert contents[2]["parts"][0]["functionResponse"]["response"]["content"] == "Cats are popular domestic pets."

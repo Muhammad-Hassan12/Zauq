@@ -43,6 +43,9 @@ async def reminder_polling_loop():
                         user_id = rem.get("user_id")
                         msg_text = rem.get("message")
 
+                        # Mark as in-flight BEFORE posting so a restart won't re-deliver
+                        await client.post(f"{BACKEND_URL}/api/reminders/mark_delivering?reminder_id={rem_id}")
+
                         channel = bot.get_channel(int(channel_id)) if channel_id and channel_id.isdigit() else None
                         if channel:
                             embed = discord.Embed(
@@ -50,14 +53,24 @@ async def reminder_polling_loop():
                                 description=f"<@{user_id}>, you asked me to remind you:\n\n\"{msg_text}\"",
                                 color=discord.Color.gold()
                             )
-                            await channel.send(content=f"<@{user_id}>", embed=embed)
+                            try:
+                                await channel.send(content=f"<@{user_id}>", embed=embed)
+                            except Exception as send_err:
+                                logger.error(f"Failed to send reminder {rem_id} to channel {channel_id}: {send_err}")
+                                # Don't mark delivered on send failure... it will retry next cycle
+                                # (delivering=True prevents re-fetch, so reset it)
+                                await client.post(
+                                    f"{BACKEND_URL}/api/reminders/mark_delivering?reminder_id={rem_id}&reset=true"
+                                )
+                                continue
 
-                        # Mark as delivered
+                        # Mark as fully delivered
                         await client.post(f"{BACKEND_URL}/api/reminders/mark_delivered?reminder_id={rem_id}")
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"Error in reminder polling loop: {e}")
+
 
 @bot.tree.command(name="mode", description="Switch operating mode (channel-specific or permanent community default)")
 @app_commands.describe(
@@ -552,6 +565,7 @@ async def on_message(message: discord.Message):
                                     tool_name=act_data.get("tool_name") or trace_item.get("tool", "unknown"),
                                     arguments=act_data.get("arguments", {}),
                                     risk=act_data.get("risk", "write"),
+                                    signature=act_data.get('signature'),
                                 )
                                 confirm_embed = action_view.build_preview_embed()
                                 confirm_msg = await target_channel.send(embed=confirm_embed, view=action_view)

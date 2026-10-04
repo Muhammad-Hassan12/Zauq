@@ -68,7 +68,7 @@ def test_auto_policy_auto_selects_on_intent(router: CapabilityRouter):
     assert "code.execute" not in [t.name for t in tools_without_intent]
 
 
-def test_auto_policy_always_selects_unconditionally(router: CapabilityRouter):
+def test_auto_policy_always_selects_runnable_task(router: CapabilityRouter):
     """When auto_code_test_mode is 'always', code.execute is selected if allow_code_exec=True."""
     tools = router.select_tools(
         messages=[{"role": "user", "content": "Write a quick sorting function"}],
@@ -78,6 +78,11 @@ def test_auto_policy_always_selects_unconditionally(router: CapabilityRouter):
         auto_code_test_mode="always",
     )
     assert "code.execute" in [t.name for t in tools]
+
+
+def test_always_keeps_casual_conversation_tool_free(router):
+    tools = router.select_tools(messages=[{'role':'user','content':'hello, how are you?'}],provider='gemini',model_name='gemini-2.5-flash',allow_code_exec=True,auto_code_test_mode='always')
+    assert 'code.execute' not in [t.name for t in tools]
 
 
 def test_allow_code_exec_false_always_blocks(router: CapabilityRouter):

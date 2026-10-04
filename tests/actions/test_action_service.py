@@ -95,7 +95,9 @@ async def test_action_service_deny():
 
 
 @pytest.mark.asyncio
-async def test_action_service_single_use_execution():
+async def test_action_service_single_use_execution(monkeypatch):
+    from backend.config import settings
+    monkeypatch.setattr(settings, 'MCP_ENABLED', True)
     store = InMemoryActionStore()
     service = ActionService(store=store)
 

@@ -1,4 +1,6 @@
 from __future__ import annotations
+import hashlib
+import re
 
 
 def canonical_to_alias(name: str) -> str:
@@ -8,7 +10,13 @@ def canonical_to_alias(name: str) -> str:
     Dots are replaced with double-underscores because not every LLM provider
     accepts dots in function/tool names.
     """
-    return name.replace(".", "__")
+    if not isinstance(name, str) or not name:
+        raise ValueError('Tool name cannot be empty')
+    alias = name.replace('.', '__')
+    if '__' in name or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,63}', alias):
+        prefix = re.sub(r'[^A-Za-z0-9_]', '_', name)[:40]
+        alias = 't_' + prefix + '_' + hashlib.sha256(name.encode()).hexdigest()[:16]
+    return alias
 
 
 def alias_to_canonical(alias: str) -> str:
@@ -33,8 +41,8 @@ class AliasMap:
     """
 
     def __init__(self) -> None:
-        self._c2a: dict[str, str] = {}   # canonical -> alias
-        self._a2c: dict[str, str] = {}   # alias -> canonical
+        self._c2a: dict[str, str] = {}
+        self._a2c: dict[str, str] = {}
 
     def register(self, canonical: str) -> str:
         """

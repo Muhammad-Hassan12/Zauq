@@ -1,8 +1,4 @@
-"""Tool Schema Normalization and Formatting across Model Providers.
-
-Translates Zauq ToolSpec schemas into provider-native tool declarations for
-Gemini, Anthropic, and OpenAI-compatible providers (Qwen, DeepSeek, DigitalOcean).
-"""
+"""Tool Schema Normalization and Formatting across Model Providers."""
 
 from __future__ import annotations
 from typing import Any, Dict, List, Union
@@ -53,10 +49,16 @@ def to_gemini_tools(specs: List[Union[ToolSpec, Dict[str, Any]]]) -> List[Dict[s
             desc = spec.get("description", "")
             schema = spec.get("input_schema") or spec.get("parameters") or {}
 
+        import copy
+        def needs_json_schema(value):
+            if isinstance(value, dict):
+                return any(k in ('$defs', '$ref', 'anyOf', 'oneOf', 'allOf', 'additionalProperties', 'const') or (k == 'type' and isinstance(v, list)) or needs_json_schema(v) for k,v in value.items())
+            return isinstance(value, list) and any(needs_json_schema(v) for v in value)
+        parameter = {'parametersJsonSchema': copy.deepcopy(schema)} if needs_json_schema(schema) else {'parameters': _clean_schema_for_gemini(schema)}
         declarations.append({
             "name": name,
             "description": desc,
-            "parameters": _clean_schema_for_gemini(schema),
+            **parameter,
         })
 
     return [{"functionDeclarations": declarations}] if declarations else []
@@ -111,4 +113,8 @@ def to_openai_tools(specs: List[Union[ToolSpec, Dict[str, Any]]]) -> List[Dict[s
 
 def normalize_tool_call_name(call_name: str) -> str:
     """Converts provider alias back to canonical dot-separated tool name."""
+    from backend.tools.registry import tool_registry
+    spec = tool_registry.get(call_name)
+    if spec:
+        return spec.name
     return alias_to_canonical(call_name)

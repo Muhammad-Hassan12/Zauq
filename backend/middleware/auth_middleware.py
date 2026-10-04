@@ -15,18 +15,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
     Internal API Key authentication middleware.
     Every request must include the X-Zauq-Token header matching INTERNAL_API_KEY.
-    Public paths (/health) are exempt. If INTERNAL_API_KEY is not set in .env,
-    auth is skipped (safe for local development).
+    Public paths (/health) are exempt. Missing credentials deny access unless
+    DEVELOPMENT_MODE is explicitly enabled.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # Skip auth if no key is configured (dev fallback)
-        if not settings.INTERNAL_API_KEY:
-            return await call_next(request)
-
         # Always allow health check
         if request.url.path in _PUBLIC_PATHS:
             return await call_next(request)
+
+        if not settings.INTERNAL_API_KEY:
+            if settings.DEVELOPMENT_MODE:
+                return await call_next(request)
+            return JSONResponse(status_code=503, content={'detail':'Internal authentication is not configured.'})
 
         token = request.headers.get("X-Zauq-Token", "")
         if not token or not hmac.compare_digest(token, settings.INTERNAL_API_KEY):

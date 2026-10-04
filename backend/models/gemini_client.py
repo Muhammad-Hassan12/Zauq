@@ -1,3 +1,4 @@
+from backend.memory.usage import record_usage
 import re
 import httpx
 from typing import List, Dict, Any, AsyncGenerator, Optional
@@ -12,11 +13,9 @@ def sanitize_response_output(text: str) -> str:
     if not text:
         return text
 
-    # 1. Strip XML thought blocks <thought>...</thought> and <think>...</think>
     text = re.sub(r"<thought>.*?</thought>", "", text, flags=re.DOTALL).strip()
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-    # 2. If Gemma/Open models output internal draft listings (Draft 1, Draft 2, Draft 3...)
     if "Draft 3" in text or "Draft 2" in text or "Draft 1" in text:
         matches = list(re.finditer(r"(?:\*+\s*)?Draft\s*\d+[^\n:]*:\s*\*?\s*(.*?)(?=\n\s*\*+\s*Draft|\Z)", text, flags=re.DOTALL | re.IGNORECASE))
         if matches:
@@ -47,7 +46,6 @@ def format_grounding_citations(text: str, grounding_meta: Optional[Dict[str, Any
         title = web.get("title") or uri
         if uri and uri not in seen_uris:
             seen_uris.add(uri)
-            # Truncate title if excessively long
             clean_title = (title[:60] + "...") if len(title) > 60 else title
             sources.append(f"• [{clean_title}]({uri})")
 
@@ -76,23 +74,30 @@ class GeminiClient:
         enable_search: bool = False,
         thinking_enabled: bool = False,
         tools: Optional[List[Any]] = None,
+        model_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         contents = []
         all_media = (media_parts or []) + (image_parts or [])
+        last_user = max((i for i, m in enumerate(messages) if isinstance(m, dict) and m.get('role') == 'user'), default=-1)
 
         for idx, raw_msg in enumerate(messages):
             msg = raw_msg.to_dict() if isinstance(raw_msg, ToolResultMessage) else raw_msg
             msg_role = msg.get("role", "user")
+            continuation = msg.get('_provider_continuation', {})
+            if msg_role in ('assistant', 'model') and continuation.get('provider') == 'gemini':
+                import copy
+                contents.append(copy.deepcopy(continuation['content']))
+                continue
 
-            # 1. Tool result message (fed back after function execution)
             if msg_role in ["tool", "function"]:
                 name = msg.get("name") or msg.get("tool_name") or ""
                 alias = canonical_to_alias(name) if "." in name else name
                 content_val = msg.get("content", "")
                 contents.append({
-                    "role": "function",
+                    "role": "user",
                     "parts": [{
                         "functionResponse": {
+                            **({'id':msg['provider_call_id']} if msg.get('provider_call_id') else {}),
                             "name": alias,
                             "response": {"name": alias, "content": str(content_val)}
                         }
@@ -100,7 +105,6 @@ class GeminiClient:
                 })
                 continue
 
-            # 2. Assistant message with prior tool calls
             if msg_role in ["model", "assistant"] and msg.get("tool_calls"):
                 parts = []
                 if msg.get("content"):
@@ -113,12 +117,10 @@ class GeminiClient:
                 contents.append({"role": "model", "parts": parts})
                 continue
 
-            # 3. Standard text & multimodal user / model turn
             role = "user" if msg_role in ["user", "system"] else "model"
             parts = [{"text": str(msg.get("content", ""))}]
 
-            # Attach multimodal media parts (Images and Audio) to the final user message
-            if idx == len(messages) - 1 and role == "user" and all_media:
+            if idx == last_user and role == "user" and all_media:
                 for item in all_media:
                     mime = item.get("mime_type") or ("image/png" if item.get("type") == "image" else "audio/ogg")
                     b64_data = item.get("bytes_b64", "")
@@ -135,7 +137,14 @@ class GeminiClient:
                 "parts": parts
             })
 
-        # Thinking mode uses a dedicated thinking budget; reserve enough tokens for output
+        merged = []
+        for content in contents:
+            if merged and content['role'] == 'user' and merged[-1]['role'] == 'user':
+                merged[-1]['parts'].extend(content['parts'])
+            else:
+                merged.append(content)
+        contents = merged
+
         thinking_budget = 16384 if thinking_enabled else None
 
         payload: Dict[str, Any] = {
@@ -146,9 +155,11 @@ class GeminiClient:
             }
         }
 
-        if thinking_enabled and thinking_budget:
+        from backend.models.capabilities import supports_thinking
+        selected_model = model_name or self.default_model
+        if thinking_enabled and supports_thinking('gemini', selected_model):
             payload["generationConfig"]["thinkingConfig"] = {
-                "thinkingBudget": thinking_budget
+                **({'thinkingLevel':'high'} if selected_model.startswith('gemini-3') else {'thinkingBudget':thinking_budget})
             }
 
         if system_prompt:
@@ -156,7 +167,6 @@ class GeminiClient:
                 "parts": [{"text": system_prompt}]
             }
 
-        # Native tool declarations or Google Search Grounding (Phase 9)
         if tools:
             gemini_tools = to_gemini_tools(tools)
             if gemini_tools:
@@ -194,13 +204,13 @@ class GeminiClient:
             media_parts=media_parts,
             image_parts=image_parts,
             enable_search=enable_search,
-            thinking_enabled=thinking_enabled
+            thinking_enabled=thinking_enabled,
+            model_name=target_model,
         )
 
         async with httpx.AsyncClient(timeout=600.0) as client:
             response = await client.post(url, json=payload)
             if response.status_code != 200:
-                # If Google Search Grounding fails on specific unsupported model, retry without search tool
                 if enable_search and response.status_code == 400:
                     payload.pop("tools", None)
                     response = await client.post(url, json=payload)
@@ -209,12 +219,12 @@ class GeminiClient:
                     raise RuntimeError(f"Gemini API Error ({response.status_code}) for model {model_path}: {response.text}")
 
             data = response.json()
+            record_usage('gemini', model_name or "gemini-2.5-flash", data)
             try:
                 candidate = data["candidates"][0]
-                raw_text = candidate["content"]["parts"][0]["text"]
+                raw_text = '\n'.join(p['text'] for p in candidate['content']['parts'] if 'text' in p and not p.get('thought'))
                 clean_text = sanitize_response_output(raw_text)
 
-                # Format citations if Google Search Grounding was active
                 grounding_meta = candidate.get("groundingMetadata")
                 return format_grounding_citations(clean_text, grounding_meta)
             except (KeyError, IndexError):
@@ -248,7 +258,8 @@ class GeminiClient:
             media_parts=media_parts,
             image_parts=image_parts,
             enable_search=enable_search,
-            thinking_enabled=thinking_enabled
+            thinking_enabled=thinking_enabled,
+            model_name=target_model,
         )
 
         async with httpx.AsyncClient(timeout=600.0) as client:
@@ -265,8 +276,9 @@ class GeminiClient:
                         import json
                         try:
                             data = json.loads(json_str)
-                            text_chunk = data["candidates"][0]["content"]["parts"][0]["text"]
-                            yield text_chunk
+                            for part in data['candidates'][0]['content']['parts']:
+                                if 'text' in part and not part.get('thought'):
+                                    yield part['text']
                         except (KeyError, IndexError, json.JSONDecodeError):
                             continue
 
@@ -298,6 +310,7 @@ class GeminiClient:
             enable_search=False,
             thinking_enabled=thinking_enabled,
             tools=tools,
+            model_name=target_model,
         )
 
         async with httpx.AsyncClient(timeout=600.0) as client:
@@ -306,6 +319,7 @@ class GeminiClient:
                 raise RuntimeError(f"Gemini Agent Turn Error ({response.status_code}) for model {model_path}: {response.text}")
 
             data = response.json()
+            record_usage('gemini', model_name or "gemini-2.5-flash", data)
             try:
                 candidate = data["candidates"][0]
                 parts = candidate.get("content", {}).get("parts", [])
@@ -320,8 +334,8 @@ class GeminiClient:
                         canon_name = normalize_tool_call_name(raw_name)
                         args = fc.get("args") or {}
                         call_id = fc.get("id") or f"gemini_call_{idx+1}"
-                        tool_calls.append(ToolCall(id=call_id, name=canon_name, arguments=args))
-                    elif "text" in part:
+                        tool_calls.append(ToolCall(id=call_id, name=canon_name, arguments=args, provider_call_id=fc.get('id')))
+                    elif "text" in part and not part.get('thought'):
                         text_blocks.append(part["text"])
 
                 raw_text = "\n".join(text_blocks)
@@ -330,11 +344,11 @@ class GeminiClient:
                 return AgentModelTurn(
                     text=clean_text if clean_text else None,
                     tool_calls=tool_calls,
-                    raw_metadata={"candidate": candidate}
+                    raw_metadata=data,
+                    provider_continuation={'provider':'gemini', 'content':candidate['content']},
                 )
             except (KeyError, IndexError) as e:
                 raise RuntimeError(f"Unexpected response structure from Gemini API: {data} ({e})")
 
 
 gemini_client = GeminiClient()
-

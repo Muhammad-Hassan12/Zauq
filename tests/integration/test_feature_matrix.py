@@ -90,13 +90,15 @@ async def test_search_service_flow():
 # ── 3. Sandbox /run Flow ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_sandbox_run_endpoint_flow():
+async def test_sandbox_run_endpoint_flow(monkeypatch):
     """Verify /api/sandbox/exec receives code and returns execution response."""
     code_req = CodeExecRequest(
         code="print('Hello from Sandbox Test!')",
         language="python",
         timeout=5.0,
+        channel_id='permitted-channel',
     )
+    monkeypatch.setattr('backend.memory.db.db_helper.get_channel_profile', AsyncMock(return_value={'allow_code_exec':True}))
 
     mock_result = {
         "execution_id": "zauq_exec_mock_test",

@@ -1,5 +1,3 @@
-"""Health and status endpoint for Zauq v4 MCP Client Layer."""
-
 from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter

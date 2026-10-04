@@ -24,7 +24,8 @@ def test_truncate_output_above_limit():
     long_text = "a" * 200
     text, truncated = _truncate_output(long_text, max_chars=50)
     assert truncated is True
-    assert text.startswith("a" * 50)
+    assert len(text) <= 50
+    assert text.startswith("a")
     assert "truncated" in text.lower()
 
 
@@ -35,7 +36,8 @@ async def test_sandbox_docker_truncates_large_output(monkeypatch):
 
     mock_proc = AsyncMock()
     # Emits 500 bytes of output
-    mock_proc.communicate = AsyncMock(return_value=(b"x" * 500, b""))
+    mock_proc.stdout.read = AsyncMock(side_effect=[b'x'*500,b''])
+    mock_proc.stderr.read = AsyncMock(return_value=b'')
     mock_proc.returncode = 0
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):

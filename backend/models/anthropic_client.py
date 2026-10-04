@@ -1,9 +1,4 @@
-"""Anthropic Claude Direct Messages API Client for Zauq AI.
-
-Direct first-party connectivity to Anthropic Messages API without OpenAI proxies.
-Handles native system prompts, image blocks, extended thinking, and streaming SSE.
-"""
-
+from backend.memory.usage import record_usage
 import json
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -56,14 +51,17 @@ class AnthropicClient:
             msg = raw_msg.to_dict() if isinstance(raw_msg, ToolResultMessage) else raw_msg
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            continuation = msg.get('_provider_continuation', {})
+            if role in ('assistant', 'model') and continuation.get('provider') == 'anthropic':
+                import copy
+                formatted_messages.append({'role':'assistant','content':copy.deepcopy(continuation['content'])})
+                continue
 
-            # 1. Anthropic does not allow 'system' role in messages list
             if role == "system":
                 if content:
                     system_parts.append(str(content).strip())
                 continue
 
-            # 2. Tool result fed back from execution
             if role == "tool":
                 call_id = msg.get("tool_call_id", "")
                 result_content = msg.get("content", "")
@@ -81,7 +79,6 @@ class AnthropicClient:
                 })
                 continue
 
-            # 3. Assistant turn with prior tool calls
             if role in ["assistant", "model"] and msg.get("tool_calls"):
                 blocks: List[Dict[str, Any]] = []
                 if content:
@@ -103,14 +100,12 @@ class AnthropicClient:
                 })
                 continue
 
-            # 4. Standard user or assistant text message
             anthropic_role = "assistant" if role in ["assistant", "model", "bot"] else "user"
             formatted_messages.append({
                 "role": anthropic_role,
                 "content": str(content)
             })
 
-        # Append media parts to the last user message if vision is supported
         if media_parts and formatted_messages and supports_vision("anthropic", model_name):
             image_blocks = []
             for part in media_parts:
@@ -128,14 +123,27 @@ class AnthropicClient:
                     })
 
             if image_blocks:
-                last_msg = formatted_messages[-1]
+                last_msg = next((m for m in reversed(formatted_messages) if m['role'] == 'user' and not (isinstance(m['content'], list) and any(b.get('type') == 'tool_result' for b in m['content']))), None)
+                if last_msg is None:
+                    return ('\n\n'.join(system_parts) or None), formatted_messages
                 existing_text = last_msg["content"]
-                # Convert string content to block list
                 blocks: List[Dict[str, Any]] = list(image_blocks)
-                if existing_text:
+                if isinstance(existing_text, list):
+                    blocks.extend(existing_text)
+                elif existing_text:
                     blocks.append({"type": "text", "text": existing_text})
                 last_msg["content"] = blocks
 
+        merged = []
+        for msg in formatted_messages:
+            if merged and merged[-1]['role'] == msg['role']:
+                for item in (merged[-1], msg):
+                    if isinstance(item['content'], str):
+                        item['content'] = [{'type':'text','text':item['content']}]
+                merged[-1]['content'].extend(msg['content'])
+            else:
+                merged.append(msg)
+        formatted_messages = merged
         combined_system = "\n\n".join(system_parts).strip() if system_parts else None
         return combined_system, formatted_messages
 
@@ -172,7 +180,6 @@ class AnthropicClient:
 
         if thinking_enabled and supports_thinking("anthropic", model):
             payload["thinking"] = {"type": "enabled", "budget_tokens": 2048}
-            # Anthropic requires temperature=1.0 or omitted when extended thinking is active
             payload["temperature"] = 1.0
             payload["max_tokens"] = 16384
         else:
@@ -189,8 +196,8 @@ class AnthropicClient:
                 )
 
             data = response.json()
+            record_usage('anthropic', payload.get("model", self.default_model), data)
             try:
-                # Content is a list of blocks: [{"type": "text", "text": "..."}]
                 text_blocks = [
                     b["text"] for b in data.get("content", []) if b.get("type") == "text"
                 ]
@@ -316,6 +323,7 @@ class AnthropicClient:
                 )
 
             data = response.json()
+            record_usage('anthropic', payload.get("model", self.default_model), data)
             try:
                 content_blocks = data.get("content", [])
                 text_blocks: List[str] = []
@@ -338,8 +346,8 @@ class AnthropicClient:
                 return AgentModelTurn(
                     text=clean_text if clean_text else None,
                     tool_calls=tool_calls,
-                    raw_metadata=data
+                    raw_metadata=data,
+                    provider_continuation={'provider':'anthropic', 'content':content_blocks},
                 )
             except Exception as e:
                 raise RuntimeError(f"Unexpected response format from Anthropic API: {data} ({e})")
-

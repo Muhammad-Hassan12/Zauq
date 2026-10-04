@@ -100,7 +100,7 @@ async def extract_and_store_user_memories(
     5. Importance-aware storage — store embedding + importance_score
     6. Memory expiry — prune decayed memories below min threshold
     """
-    if not messages:
+    if not messages or not db_helper.supabase:
         return
 
     transcript_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
@@ -168,7 +168,7 @@ async def extract_and_store_user_memories(
 
                         if sim >= 0.92:
                             # Near-duplicate: reinforce existing, skip new insert
-                            logger.debug(f"Dedup skip for user {user_id}: '{fact_str[:60]}' (similarity={sim:.3f})")
+                            logger.debug("Memory deduplication skipped a near-duplicate.")
                             if existing_id:
                                 asyncio.create_task(db_helper.reinforce_memory(existing_id))
                             skip_insert = True
@@ -184,7 +184,7 @@ async def extract_and_store_user_memories(
                             # New fact contradicts an existing one — demote the old memory
                             logger.info(
                                 f"Contradiction detected for user {user_id}: "
-                                f"new='{fact_str[:60]}' contradicts existing memory {existing_id}"
+                                f"existing memory {existing_id} was demoted"
                             )
                             if existing_id:
                                 asyncio.create_task(db_helper.halve_memory_importance(existing_id))
@@ -206,7 +206,7 @@ async def extract_and_store_user_memories(
                 confidence_score=confidence,
                 importance_score=importance
             )
-            logger.info(f"Memory stored for user {user_id} [{category}]: '{fact_str[:80]}'")
+            logger.info("Memory stored for user %s category=%s", user_id, category)
 
     except Exception as e:
         logger.warning(f"Memory extraction failed for user {user_id}: {e}")

@@ -13,7 +13,8 @@ Output strictly valid JSON with the format:
   "reason": "Brief explanation if not safe",
   "severity": "low | medium | high"
 }
-If the message is normal or casual banter, return {"classification": "safe", "reason": "", "severity": "low"}.
+Important: Friendly banter, playful roasting, Discord/gaming slang, Roman Urdu phrases, and mild casual swearing among friends are normal community banter and MUST be classified as {"classification": "safe", "reason": "", "severity": "low"}.
+Only classify as 'borderline' or 'toxic' if there is genuine harassment, hate speech, severe toxicity, doxxing, or direct threats of violence.
 """
 
 class ContentFilter:
@@ -39,7 +40,6 @@ class ContentFilter:
             data = json.loads(clean_json)
             classification = data.get("classification", "safe").lower()
 
-            # Adjust based on sensitivity
             if sensitivity == "high" and classification == "borderline":
                 data["classification"] = "toxic"
             elif sensitivity == "low" and classification == "borderline":

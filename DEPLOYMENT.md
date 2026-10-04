@@ -1,253 +1,108 @@
-# 🚀 Zauq (ذوق) v4.0.0 Production Deployment & Migration Guide
+# Zauq v4 deployment and migration
 
-This guide walks through deploying **Zauq v4.0.0** to production using either **Docker Compose** (recommended for production security with Docker socket isolation) or **PM2 process supervision** (VPS/bare-metal).
+Use a controlled staging environment before enabling tools for a community. The backend requires Python 3.11/3.12 and an internal API key; code execution additionally requires Docker Engine, pre-pulled images and the separate runner. Supabase is optional for basic chat but required for persistent profiles, memory, durable approvals and metrics.
 
----
+## Database setup
 
-## 1. Prerequisites
+Back up the database before upgrading. For a **fresh Supabase installation**, run [backend/memory/schema.sql](backend/memory/schema.sql). It includes pgvector, application tables, RLS, memory functions and v4 additions. It is tested for repeat execution by the pgvector CI gate.
 
-* **Operating System:** Linux (Ubuntu 22.04 LTS / Debian 12 recommended)
-* **Python:** Python 3.11+
-* **Container Runtime:** Docker Engine 24.0+ and Docker Compose v2.20+
-* **Process Manager:** PM2 (optional if running bare-metal: `npm install -g pm2`)
-* **Database:** Supabase PostgreSQL with `pgvector` extension enabled
-* **Discord Application:** Bot Token with Privileged Gateway Intents (Message Content, Server Members) enabled in [Discord Developer Portal](https://discord.com/developers/applications)
+For an **existing v3 installation**, apply the SQL files in this order, using the SQL editor or a database migration tool:
 
----
+1. [001_v4_providers.sql](backend/memory/migrations/001_v4_providers.sql): provider constraint expansion.
+2. [002_v4_auto_code_test_mode.sql](backend/memory/migrations/002_v4_auto_code_test_mode.sql): text auto-test policy.
+3. [003_v4_pending_actions.sql](backend/memory/migrations/003_v4_pending_actions.sql): signatures, indexes and RLS for actions.
+4. [004_v4_rollout.sql](backend/memory/migrations/004_v4_rollout.sql): nullable channel/server preferences.
+5. [005_v4_metrics.sql](backend/memory/migrations/005_v4_metrics.sql): complete telemetry and service-role-only aggregate.
+6. [006_v4_schema_repair.sql](backend/memory/migrations/006_v4_schema_repair.sql): repair early boolean auto modes and reconcile constraints.
 
-## 2. v4 Production Architecture
+The sequence is additive and rerunnable. Legacy boolean `true` becomes `auto`; `false` becomes `off`. It preserves explicit `allow_code_exec` values. Use the numbered SQL files as the executable upgrade source. Upgrades assume the v3 base tables already exist. Older pre-v3 deployments need the corresponding base-schema upgrade first.
 
-```text
-                              ┌──────────────────────────────────────────┐
-                              │           Discord Gateway (WS)           │
-                              │   Voice Notes · Messages · Slash Tree    │
-                              └────────────────────┬─────────────────────┘
-                                                   │
-                                      ┌────────────▼───────────┐
-                                      │   zauq-bot Container   │
-                                      │   discord.py Frontend  │
-                                      └────────────┬───────────┘
-                                                   │ HTTP
-                                      ┌────────────▼───────────┐
-                                      │ zauq-backend Container │
-                                      │ FastAPI Bounded Engine │
-                                      │ (No Docker Socket Access)
-                                      └─────┬──────────────┬───┘
-                                            │              │
-                   Internal Authenticated   │              │
-                    HTTP (X-Internal-Token) │              │
-                               ┌────────────▼─────────┐    │
-                               │ zauq-sandbox-runner  │    │
-                               │ Isolated Runner API  │    │
-                               └────────────┬─────────┘    │
-                                            │              │
-                                ┌───────────▼───────────┐  │
-                                │   Docker Socket       │  │
-                                │ (/var/run/docker.sock)│  │
-                                └───────────────────────┘  │
-                                                           │
-                                ┌──────────────────────────▼───┐
-                                │      Supabase PostgreSQL     │
-                                │ (pgvector Semantic & Lore)   │
-                                └──────────────────────────────┘
-```
+Use a **service-role** Supabase key on the backend. Anonymous/authenticated clients cannot access action records, and cannot execute the metrics summary function. Existing unsigned pending approvals must be staged again after upgrading; do not execute them. Changing the internal signing key invalidates outstanding approvals.
 
----
+## Docker Compose
 
-## 3. Database Migration (from v3 to v4)
+From the repository root:
 
-In your Supabase project dashboard, navigate to the **SQL Editor** and run the additive v4 schema migrations from `backend/memory/schema.sql`:
-
-```sql
--- 1. Enable pgvector extension (if not already enabled)
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- 2. Pending Actions Table for Human-in-the-Loop confirmations (Phase 7)
-CREATE TABLE IF NOT EXISTS pending_actions (
-    action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    guild_id TEXT,
-    channel_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    arguments JSONB NOT NULL DEFAULT '{}'::jsonb,
-    risk TEXT NOT NULL DEFAULT 'write',
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    executed_at TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (user_id, status);
-CREATE INDEX IF NOT EXISTS idx_pending_actions_expires_at ON pending_actions (expires_at);
-
--- 3. Additive columns for existing channel_profiles table
-ALTER TABLE channel_profiles
-    ADD COLUMN IF NOT EXISTS auto_code_test_mode TEXT NOT NULL DEFAULT 'off' CHECK (auto_code_test_mode IN ('off', 'auto', 'always'));
-
--- 4. Additive columns for existing request_logs table (Observability & Cost tracking)
-ALTER TABLE request_logs
-    ADD COLUMN IF NOT EXISTS tool_steps INT DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS search_calls INT DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS pages_fetched INT DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS sandbox_calls INT DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS mcp_calls INT DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS tool_failures INT DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS agent_duration_ms INT,
-    ADD COLUMN IF NOT EXISTS input_tokens INT,
-    ADD COLUMN IF NOT EXISTS output_tokens INT,
-    ADD COLUMN IF NOT EXISTS estimated_cost_usd DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS request_id TEXT,
-    ADD COLUMN IF NOT EXISTS agent_run_id TEXT;
-```
-
----
-
-## 4. Production Deployment with Docker Compose (Recommended)
-
-### Step 1: Clone Repository
-```bash
-git clone https://github.com/Muhammad-Hassan12/Zauq-v4.git /opt/zauq
-cd /opt/zauq
-```
-
-### Step 2: Configure Environment
 ```bash
 cp .env.example .env
-nano .env
+openssl rand -hex 32
 ```
-Fill in your credentials:
-* `DISCORD_BOT_TOKEN`: Discord Bot Token
-* `GEMINI_API_KEY`: Google AI Studio API key
-* `SUPABASE_URL` and `SUPABASE_KEY`: Supabase project URL and service role secret key
-* `INTERNAL_API_KEY`: Strong random secret (e.g. `openssl rand -hex 32`)
-* `SERPER_API_KEY`: Serper.dev API key for Google search
 
-### Step 3: Pull Sandbox Base Images
-Pre-pull the lightweight sandbox container images to avoid cold-start delays:
+Put the generated value in `INTERNAL_API_KEY`. Fill in the Discord token and the credentials you actually use; leave optional services blank. Keep `DEVELOPMENT_MODE=false`, `AGENT_RUNTIME_ENABLED=false` and `MCP_ENABLED=false` initially.
+
+Set `SANDBOX_HOST_SPOOL_DIR` to an absolute Docker-host path, normally `/var/lib/zauq/sandbox`. The runner mounts that host directory at `/sandbox-spool` and maps code files back to the host path when starting sibling containers. Docker resolves bind sources on the daemon host, not inside the runner container. The runner must be able to create and clean files there. Remote Docker daemons need an equivalent shared path; a runner-local temporary directory alone does not work. [Docker bind-mount documentation](https://docs.docker.com/engine/storage/bind-mounts/).
+
+Pre-pull execution images; requests use `--pull never`:
+
 ```bash
 docker pull python:3.11-slim
 docker pull node:18-alpine
 docker pull alpine:latest
-```
-
-### Step 4: Build & Launch Services
-```bash
+docker compose config --quiet
 docker compose up -d --build
 ```
-This automatically deploys:
-1. `zauq-sandbox-runner`: Isolated microservice mounting `/var/run/docker.sock` on port 8001.
-2. `zauq-backend`: FastAPI engine running on port 8002 without Docker privileges.
-3. `zauq-bot`: Discord gateway bot connected to the backend.
 
-### Step 5: Verify Service Health
+Only the runner mounts `/var/run/docker.sock`. Its environment contains the internal token and sandbox settings, excluding Discord, provider and Supabase credentials. The runner is a trusted Docker administrator; an execution-container boundary does not make the runner itself unprivileged. The backend and bot images copy selected source directories, and `.dockerignore` excludes local credentials and MCP secrets.
+
+The backend publishes **127.0.0.1:8002**. The runner listens on **8001 inside the Compose network**, with no host port. The bot uses `http://backend:8002`; the backend uses `http://sandbox-runner:8001`. All three receive the same internal key. Keep the Docker socket and internal API off public networks.
+
+Check service health:
+
 ```bash
-# Check running containers
 docker compose ps
-
-# Check sandbox runner health
-curl http://127.0.0.1:8001/health
-# Expected: {"status":"ok","service":"sandbox-runner"}
-
-# Check backend health
-curl http://127.0.0.1:8002/api/model/providers
+curl --fail http://127.0.0.1:8002/health
+docker compose exec backend python -c "import httpx; print(httpx.get('http://sandbox-runner:8001/health').json())"
+docker compose logs --tail=100 backend sandbox-runner bot
 ```
 
----
+For authenticated status/API requests, send `X-Zauq-Token` to the backend. The backend uses `X-Internal-Token` for the runner. `/health` is public liveness, not a guarantee that providers, database or execution images work. `/sandbox status` reports runner availability; execute a small permitted `/run` to verify the entire mount path.
 
-## 5. Alternative VPS Bare-Metal Deployment with PM2
+## Separate processes / PM2
 
-If running directly on a Linux VPS without containerizing the backend:
+Launch from the repository root so imports, `.env` and relative paths resolve correctly:
 
 ```bash
-# 1. Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8002
+python -m uvicorn backend.sandbox.runner_service:app --host 127.0.0.1 --port 8001
+python -m bot.client
+```
 
-# 2. Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
+Set `SANDBOX_RUNNER_URL=http://127.0.0.1:8001`. Run the runner under a separately controlled Docker-capable identity; the backend should not share that privilege. For processes on the same host without a containerized runner, leave both spool settings blank to use host temporary files. The included [infra/pm2.config.js](infra/pm2.config.js) supervises backend and bot without hard-coded installation paths; supervise the privileged runner separately.
 
-# 3. Pre-pull sandbox images
-docker pull python:3.11-slim
-docker pull node:18-alpine
-docker pull alpine:latest
-
-# 4. Start isolated sandbox runner (Terminal 1 or PM2)
-python -m uvicorn backend.sandbox.runner_service:app --host 127.0.0.1 --port 8001 &
-
-# 5. Launch with PM2
+```bash
 pm2 start infra/pm2.config.js
-pm2 save
-pm2 startup
+pm2 logs
 ```
 
----
+Do not run development reload mode under production supervision. If an API must be exposed beyond loopback, configure authentication, TLS and a trusted network boundary deliberately; Compose does not publish the runner.
 
-## 6. Step-by-Step v4 Migration & Safe Rollout Order
+## Scoped rollout
 
-Do **not** enable every new v4 feature simultaneously on production servers. Follow this staged rollout:
+1. Verify ordinary chat, chosen model, files, memory and the fallback disclosure with both master flags off.
+2. Set `AGENT_ALLOWED_GUILD_IDS` and/or `AGENT_ALLOWED_CHANNEL_IDS` to your test IDs, then enable `AGENT_RUNTIME_ENABLED` and restart the backend. A nonempty list restricts access; both list checks must pass when both are configured.
+3. Use `/agent enable enabled:true scope:Channel` or `scope:Server`. Saved channel preference overrides server preference, but cannot bypass a master disable or operator allowlist. `/agent status` shows effective settings. Persistence requires Supabase.
+4. Test quick/deep search and explicit search disable. Verify unavailable-key behavior, snippet labels and bounded citations.
+5. Enable execution permission on a test channel. Auto mode is separate: `off` permits manual `/run`, `auto` allows relevant lightweight testing, and `always` requests testing for runnable code tasks. Explicit permission `false` remains a denial after mode updates.
+6. Add one read-only MCP server, then enable `MCP_ENABLED` and its rollout allowlists. Supply guild scope and explicit allowed tools. Verify out-of-scope denial before considering write tools.
+7. Exercise approval, denial, expiry, changed scope and concurrent clicks. Claims are at-most-once attempts; a crash after claiming may leave an unknown external outcome. Check the external system before staging a replacement action.
+8. Review usage, deadlines and resource measurements before expanding access.
 
-```text
-Development / Local Testing
-           ↓
-Private Discord Test Channel / Staff Server
-           ↓
-Agent Runtime Enabled for One Test Guild
-           ↓
-Serper Search Enabled for Production
-           ↓
-Auto Sandbox Testing (Channel Opt-in)
-           ↓
-MCP Read-Only Tools Enabled
-           ↓
-MCP Approval-Based Write Tools Enabled
-           ↓
-General Rollout across All Guilds
-```
+## MCP configuration
 
-### Rollout Milestones
+Copy [config/mcp_servers.example.json](config/mcp_servers.example.json) to `config/mcp_servers.json`. Examples are disabled and require a real server/endpoint. Config is trusted operator input and is never accepted from chat. Prefer `${VARIABLE}` references for tokens.
 
-1. **Phase 1 — Baseline Stability:**
-   Deploy code with default feature flags:
-   * `AGENT_RUNTIME_ENABLED=false`
-   * `MCP_ENABLED=false`
-   * `AUTO_CODE_TEST_DEFAULT=off`
-   Verify that all existing chat, slash commands, voice TTS, and document reading continue to function normally.
+Servers support `stdio` and `streamable_http`; SSE is not implemented. Omitted guild scope denies tool access. An explicit `allow_global_access:true` grants global scope; otherwise supply `allowed_guild_ids`. New discovered tools stay disabled unless named in `allowed_tools` or given a local `tool_risks` classification. Default risk is `write`; use `read` only for tools you have verified. `selection_keywords` controls cheap relevance routing for non-GitHub services.
 
-2. **Phase 2 — Enable Serper Search:**
-   Set `SERPER_API_KEY` and verify `/search` produces clean organic results with live web evidence.
+Mount the actual operator config read-only into the backend when enabling MCP in Compose, and set `MCP_CONFIG_PATH` to that mounted path. It is intentionally excluded from images. Do not pass all backend credentials to a stdio server; configure only its required environment. Reconnection backs off and stops after five failures; an operator refresh restarts attempts.
 
-3. **Phase 3 — Test Channel Agent Verification:**
-   On a private test server or dedicated bot channel, test bounded tool execution:
-   * Set `AGENT_RUNTIME_ENABLED=true` in `.env` or enable for a test guild.
-   * Send queries requiring web search: *"What is the latest release of Python?"*
-   * Send queries requiring code execution: *"Run a python script to calculate the first 10 fibonacci numbers."*
-   * Verify bounded loop terminates within 4 steps and logs metrics in `request_logs`.
+## Required release checks
 
-4. **Phase 4 — Human Confirmation Validation:**
-   Trigger an action with `risk: write` or `risk: destructive`.
-   Verify the bot posts an interactive Discord embed with **Approve** and **Deny** buttons, requiring user authorization before executing.
+CI must pass syntax/imports, dependency consistency, hermetic regressions, actual MCP transports, repeat PostgreSQL/pgvector migrations, real Docker execution/cancellation and the Compose spool topology. Local mock results do not replace those gates.
 
-5. **Phase 5 — Model Context Protocol (MCP) Rollout:**
-   * Configure read-only tools in `config/mcp_servers.json`.
-   * Set `MCP_ENABLED=true` and verify status with `/mcp status`.
-   * Test `/mcp tools` in scoped guilds.
-   * Only promote write tools to production after testing confirmation dialogs.
+Controlled staging must additionally verify Discord mentions/replies/DMs/threads, uploads and voice notes, model switching, fallback, memory/lore, moderation, media, reminders/XP, manual and automatic sandbox execution, scoped MCP and signed buttons. Verify database RLS with non-service-role credentials, actual model availability and account prices. Measure p50/p95 latency and memory/CPU under realistic concurrency. Automated tests do not establish these live results.
 
----
+## Rollback and recovery
 
-## 7. Logs & Maintenance
+Disable agent/MCP master flags and automatic code testing first; ordinary direct chat remains available. Keep additive columns in place when rolling application code back. Do not replay executed/claimed actions. Preserve database backups and verify the target version can read current text policy fields before restoring it. Restore data only through your normal database recovery procedure.
 
-```bash
-# View backend logs in Docker
-docker compose logs -f backend
-
-# View sandbox runner logs
-docker compose logs -f sandbox-runner
-
-# View Discord bot logs
-docker compose logs -f bot
-
-# Restart individual service
-docker compose restart backend
-```
+If execution reports a mount error, verify the daemon-host spool path and ownership. If it reports image absence, pre-pull the configured image on that Docker daemon. If auth returns 401, verify all service keys match; 503 with a blank key means development bypass is off. If metrics fall back to in-memory, check migration 005, service-role credentials and RPC permissions. A provider failure needs an account/model availability check; autocomplete does not validate those remotely.

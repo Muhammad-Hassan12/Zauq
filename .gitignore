@@ -4,12 +4,24 @@
 !.env.example
 *.pem
 *.key
+*.p12
+*.pfx
+*.jks
+*.keystore
 *.crt
 *.cert
 *secret*.json
 *credentials*.json
+/.aws/
 config/mcp_servers.json
 !config/mcp_servers.example.json
+
+# Local audit material
+/v4-Audit-Report.md
+/v4-Fix-Log.md
+/v4-Remediation-Report.md
+/audit/
+/v4-Update.md
 
 # Python
 __pycache__/
@@ -30,9 +42,16 @@ logs/
 *.log
 *.log.*
 /tmp/
+/temp/
+/sandbox-spool/
 .pytest_cache/
+.tox/
+.nox/
+.hypothesis/
 .coverage
 .coverage.*
+coverage.xml
+/junit.xml
 htmlcov/
 .cache/
 .mypy_cache/
@@ -40,6 +59,12 @@ htmlcov/
 *.sqlite
 *.sqlite3
 *.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
 
 # IDE & OS
 .idea/
@@ -48,4 +73,3 @@ htmlcov/
 *.swo
 .DS_Store
 Thumbs.db
-

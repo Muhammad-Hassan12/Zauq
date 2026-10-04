@@ -1,70 +1,115 @@
-name: Zauq v4 Continuous Integration
-
+name: Zauq v4 release gates
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
 
 jobs:
-  test:
+  regression:
     runs-on: ubuntu-latest
-
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: zauq-ci-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      ZAUQ_TEST_POSTGRES_DSN: postgresql://postgres:zauq-ci-only@127.0.0.1:5432/postgres
+      ZAUQ_REQUIRE_PGVECTOR: 'true'
+      ZAUQ_RUN_DOCKER_TESTS: 'true'
+      ZAUQ_ENV_FILE: /dev/null
+      DEVELOPMENT_MODE: 'true'
+      INTERNAL_API_KEY: zauq-ci-internal-token-only
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: 'pip'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-asyncio pytest-cov
-
-    - name: Pre-pull Docker Sandbox Images
-      run: |
-        docker pull python:3.11-slim
-        docker pull node:18-alpine
-        docker pull alpine:latest
-
-    # Stage 1: Syntax & Import Verification
-    - name: "Stage 1: Syntax & Core Import Verification"
-      run: |
-        python -c "import backend.main, backend.config, backend.agent.runtime, backend.models.router, backend.security; print('All core modules imported successfully.')"
-
-    # Stage 2: Unit Tests (Agent, Tools, Models)
-    - name: "Stage 2: Unit Tests (Agent, Tools, Models)"
-      run: pytest tests/agent/ tests/tools/ tests/models/ -v
-
-    # Stage 3: Search Mocks
-    - name: "Stage 3: Search Subsystem Mocks"
-      run: pytest tests/search/ -v
-
-    # Stage 4: MCP In-Process Test Server
-    - name: "Stage 4: MCP Client & Tool Adapter Tests"
-      run: pytest tests/mcp/ -v
-
-    # Stage 5: Security Tests
-    - name: "Stage 5: Security Hardening & SSRF Defense Tests"
-      run: pytest tests/security/ -v
-
-    # Stage 6: Docker Sandbox Tests
-    - name: "Stage 6: Docker Sandbox Tests"
-      run: pytest tests/sandbox/ -v
-
-    # Stage 7: Integration Tests (Chat flows, Feature Matrix, Observability, Actions, Bot)
-    - name: "Stage 7: Integration & Regression Checklist Tests"
-      run: pytest tests/integration/ tests/observability/ tests/actions/ tests/bot/ tests/chat/ -v
-
-    # Backward Compatibility Validation (Legacy suites)
-    - name: "Backward Compatibility: Legacy Utility Suites"
-      run: |
-        python -m backend.utils.test_security_hardening
-        python -m backend.utils.test_sandbox_suite
-        python -m backend.utils.test_deep_search
-        python -m backend.utils.test_info_command
-        python -m backend.utils.test_reply_ingestion
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Pre-pull execution images
+        run: |
+          docker pull python:3.11-slim
+          docker pull python:3.12-slim
+          docker pull node:18-alpine
+          docker pull alpine:latest
+      - name: Ensure CI environment file
+        run: |
+          sudo mkdir -p /var/lib/zauq/sandbox
+          sudo chmod 777 /var/lib/zauq/sandbox
+          cp .env.example .env
+      - name: Syntax, imports and dependency consistency
+        run: |
+          python -m compileall -q backend bot tests
+          python -c 'import backend.main, bot.client'
+          pip check
+      - name: Verify configuration coverage in .env.example
+        run: |
+          python -c "from backend.config import Settings; e={l.split('=')[0].strip() for l in open('.env.example') if '=' in l and not l.strip().startswith('#')}; s=set(Settings.model_fields.keys()); m=s-e; assert not m, f'Missing in .env.example: {m}'"
+      - name: Hermetic regression, actual MCP, PostgreSQL and Docker gates
+        run: python -m pytest -q
+      - name: Validate and build isolated deployment
+        env:
+          INTERNAL_API_KEY: zauq-ci-internal-token-only
+        run: |
+          sudo mkdir -p /var/lib/zauq/sandbox
+          sudo chmod 777 /var/lib/zauq/sandbox
+          sudo chmod 666 /var/run/docker.sock
+          cp .env.example .env
+          docker compose config --quiet
+          docker compose build
+          docker compose up -d backend sandbox-runner
+      - name: Verify service topology and shared host mount
+        run: |
+          docker compose exec -T backend python - <<'PY'
+          import time
+          import httpx
+          for attempt in range(30):
+              try:
+                  httpx.get('http://127.0.0.1:8002/health', timeout=2).raise_for_status()
+                  break
+              except httpx.HTTPError:
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          PY
+          docker compose run --rm --no-deps bot python -c "import httpx; r=httpx.get('http://backend:8002/health'); r.raise_for_status()"
+          docker compose exec -T backend python - <<'PY'
+          import time
+          import httpx
+          for attempt in range(30):
+              try:
+                  httpx.get('http://sandbox-runner:8001/health', timeout=2).raise_for_status()
+                  break
+              except httpx.HTTPError:
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          PY
+          # Sandbox test runs inside sandbox-runner (which owns Docker socket + spool mount).
+          # Calling execute_code() from the *backend* container would ask the runner to
+          # bind-mount a path from inside the backend container onto the CI host —
+          # that path does not exist on the host, causing [Errno 2] No such file or directory.
+          docker compose exec -T sandbox-runner python - <<'PY'
+          import asyncio
+          from backend.sandbox.code_runner import execute_code_docker
+          r = asyncio.run(execute_code_docker('print(42)', timeout=5))
+          assert r['success'], r
+          assert '42' in r['stdout'], r
+          PY
+      - name: Show deployment diagnostics
+        if: failure()
+        run: |
+          if [ -f .env ]; then
+            docker compose logs --tail=100
+          fi
+      - name: Stop deployment
+        if: always()
+        run: |
+          if [ -f .env ]; then
+            docker compose down
+          fi

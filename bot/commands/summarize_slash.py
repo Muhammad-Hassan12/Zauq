@@ -17,7 +17,6 @@ class SummarizeSlash(commands.Cog):
         channel = interaction.channel
         limit = min(max(limit, 5), 50)
 
-        # Fetch recent channel messages
         messages_history = []
         try:
             async for msg in channel.history(limit=limit, oldest_first=False):

@@ -15,17 +15,17 @@ class ToolSpec:
     The handler callable is kept separately in the registry, not in this object,
     so ToolSpec can be safely serialized/compared.
     """
-    name: str                           # canonical name, e.g. "web.search"
+    name: str
     description: str
-    input_schema: dict[str, Any]        # JSON Schema describing accepted arguments
-    source: str = "native"              # "native" | "mcp"
+    input_schema: dict[str, Any]
+    source: str = "native"
     risk: RiskLevel = "read"
     timeout_seconds: float = 15.0
     enabled: bool = True
     server_id: str | None = None
     original_tool_name: str | None = None
     allowed_guild_ids: list[str] | None = None
-    # Internal: not compared or repr'd; populated only during registration
+    selection_keywords: list[str] = field(default_factory=list)
     _handler: Callable[[dict], Awaitable[Any]] | None = field(
         default=None, repr=False, compare=False
     )
@@ -36,7 +36,7 @@ class ToolResult:
     """
     Normalized output of a single tool execution.
 
-    Always returned by ToolExecutor — it never raises to the caller.
+    Returned for execution failures; request cancellation propagates.
     """
     tool_name: str
     success: bool

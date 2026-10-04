@@ -41,11 +41,11 @@ class PrivacySlash(commands.Cog):
         embed = discord.Embed(
             title="🔒 Zauq Privacy & Data Handling Policy",
             description=(
-                "**Zero Model Training Guarantee:**\n"
-                "Your messages are used strictly for generating real-time responses and managing channel conversation context. "
-                "No user data is ever sent to third parties for model fine-tuning or training.\n\n"
+                "**External processing:**\n"
+                "Messages, relevant context and attachments may reach the selected AI provider, fallback providers, search/page services or configured MCP tools. "
+                "Provider retention and training terms depend on the operator's accounts; Zauq cannot guarantee their policies.\n\n"
                 "**Data Controls:**\n"
-                "• Use `/forget` at any time to delete all your stored episodic memory facts.\n"
+                "• `/forget` deletes stored episodic facts for your user ID. It does not delete Discord history, logs, lore or provider copies. New conversations may create new memories.\n"
                 "• `/model status` shows which AI provider is serving your channel."
             ),
             color=discord.Color.blue()

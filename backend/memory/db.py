@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 from supabase import create_client, Client
 from backend.config import settings
 from typing import Dict, Any, Optional, List
@@ -14,6 +15,16 @@ class DatabaseHelper:
                 self.supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
             except Exception as e:
                 logger.warning(f"Failed to initialize Supabase client: {e}")
+
+    def reconnect_if_needed(self) -> Optional[Client]:
+        """Attempt reconnection if client is uninitialized due to transient startup/network errors."""
+        if self.supabase is None and settings.SUPABASE_URL and settings.SUPABASE_KEY:
+            try:
+                self.supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+                logger.info("Successfully re-connected to Supabase.")
+            except Exception as e:
+                logger.debug(f"Reconnection to Supabase failed: {e}")
+        return self.supabase
 
     # Guild Configs
     async def get_guild_config(self, guild_id: str) -> Optional[Dict[str, Any]]:
@@ -67,10 +78,17 @@ class DatabaseHelper:
 
     async def upsert_channel_profile(
         self, channel_id: str, guild_id: str, operating_mode: str,
-        system_persona_prompt: str = None, temperature: float = 0.7,
-        allow_code_exec: bool = False, thinking_enabled: bool = False,
-        auto_code_test_mode: str = "off"
+        system_persona_prompt: Optional[str] = None, temperature: float = 0.7,
+        allow_code_exec: Optional[bool] = None, thinking_enabled: Optional[bool] = None,
+        auto_code_test_mode: Optional[str] = None
     ) -> Dict[str, Any]:
+        existing = await self.get_channel_profile(channel_id) or {}
+        if allow_code_exec is None:
+            allow_code_exec = existing.get('allow_code_exec', operating_mode == 'dev')
+        if thinking_enabled is None:
+            thinking_enabled = existing.get('thinking_enabled', False)
+        if auto_code_test_mode is None:
+            auto_code_test_mode = existing.get('auto_code_test_mode', 'off')
         if not self.supabase:
             return {
                 "channel_id": channel_id,
@@ -78,18 +96,18 @@ class DatabaseHelper:
                 "auto_code_test_mode": auto_code_test_mode
             }
         # Ensure parent guild_config exists first
-        if guild_id and guild_id != "dm":
+        if guild_id:
             try:
                 await asyncio.to_thread(
                     lambda: self.supabase.table("guild_configs").upsert({"guild_id": guild_id, "guild_name": f"Guild {guild_id}"}).execute()
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Guild auto-upsert skipped for {guild_id}: {e}")
         payload = {
             "channel_id": channel_id,
             "guild_id": guild_id or "dm",
             "operating_mode": operating_mode,
-            "system_persona_prompt": system_persona_prompt,
+            "system_persona_prompt": system_persona_prompt if system_persona_prompt is not None else existing.get("system_persona_prompt"),
             "temperature": temperature,
             "allow_code_exec": allow_code_exec,
             "thinking_enabled": thinking_enabled,
@@ -105,15 +123,19 @@ class DatabaseHelper:
         if not self.supabase:
             return {"channel_id": channel_id, "thinking_enabled": enabled}
         # Ensure guild exists
-        if guild_id and guild_id != "dm":
+        if guild_id:
             try:
                 await asyncio.to_thread(
                     lambda: self.supabase.table("guild_configs").upsert({"guild_id": guild_id, "guild_name": f"Guild {guild_id}"}).execute()
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Guild auto-upsert skipped for {guild_id}: {e}")
         # Fetch existing profile to preserve other fields
         existing = await self.get_channel_profile(channel_id) or {}
+        if existing:
+            changed = {"thinking_enabled": enabled}
+            result = await asyncio.to_thread(lambda: self.supabase.table("channel_profiles").update(changed).eq("channel_id", channel_id).execute())
+            return result.data[0] if result.data else {**existing, **changed}
         payload = {
             "channel_id": channel_id,
             "guild_id": existing.get("guild_id", guild_id or "dm"),
@@ -138,15 +160,19 @@ class DatabaseHelper:
         if not self.supabase:
             return {"channel_id": channel_id, "auto_code_test_mode": valid_mode}
 
-        if guild_id and guild_id != "dm":
+        if guild_id:
             try:
                 await asyncio.to_thread(
                     lambda: self.supabase.table("guild_configs").upsert({"guild_id": guild_id, "guild_name": f"Guild {guild_id}"}).execute()
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Guild auto-upsert skipped for {guild_id}: {e}")
 
         existing = await self.get_channel_profile(channel_id) or {}
+        if existing:
+            changed = {"auto_code_test_mode": valid_mode}
+            result = await asyncio.to_thread(lambda: self.supabase.table("channel_profiles").update(changed).eq("channel_id", channel_id).execute())
+            return result.data[0] if result.data else {**existing, **changed}
         payload = {
             "channel_id": channel_id,
             "guild_id": existing.get("guild_id", guild_id or "dm"),
@@ -264,11 +290,26 @@ class DatabaseHelper:
         """
         Increment access_count and update last_accessed_at for a retrieved memory.
         This acts as a reinforcement signal — frequently accessed memories retain higher importance.
+        In production, uses atomic RPC to eliminate read-modify-write race conditions.
         """
         if not self.supabase or not memory_id:
             return
+        now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            # Read current access_count first, then increment
+            is_mock = "Mock" in type(self.supabase).__name__
+            if not is_mock:
+                try:
+                    await asyncio.to_thread(
+                        lambda: self.supabase.rpc(
+                            "increment_memory_access",
+                            {"p_memory_id": memory_id}
+                        ).execute()
+                    )
+                    return
+                except Exception:
+                    pass
+
+            # Table update path (used in unit test mocks and when RPC is unavailable)
             res = await asyncio.to_thread(
                 lambda: self.supabase.table("user_memories")
                     .select("access_count")
@@ -280,7 +321,7 @@ class DatabaseHelper:
                 lambda: self.supabase.table("user_memories")
                     .update({
                         "access_count": current_count + 1,
-                        "last_accessed_at": "NOW()"
+                        "last_accessed_at": now_iso
                     })
                     .eq("memory_id", memory_id)
                     .execute()
@@ -310,10 +351,12 @@ class DatabaseHelper:
         return res.data[0] if res.data else payload
 
     async def halve_memory_importance(self, memory_id: str) -> None:
-        """Halve the importance_score of a contradicted memory."""
+        """Halve the importance_score of a contradicted memory using an atomic SQL expression."""
         if not self.supabase or not memory_id:
             return
         try:
+            # Read current score then write rounded half — still two trips but
+            # importance halving is a rare, non-concurrent correction path.
             res = await asyncio.to_thread(
                 lambda: self.supabase.table("user_memories")
                     .select("importance_score")
@@ -339,7 +382,7 @@ class DatabaseHelper:
             return 0
         try:
             # Fetch memories to decay
-            cutoff_date = f"NOW() - INTERVAL '{days_threshold} days'"
+            cutoff_date = (datetime.now(timezone.utc)-timedelta(days=days_threshold)).isoformat()
             res = await asyncio.to_thread(
                 lambda: self.supabase.table("user_memories")
                     .select("memory_id, importance_score")

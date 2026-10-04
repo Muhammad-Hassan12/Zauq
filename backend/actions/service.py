@@ -1,11 +1,12 @@
-"""ActionService for managing Human-in-the-Loop side-effect approval workflows."""
-
 from __future__ import annotations
 import hmac
 import hashlib
 import time
 import uuid
 import logging
+import secrets
+import json
+import copy
 from typing import Any, Optional
 
 from backend.config import settings
@@ -15,23 +16,24 @@ from backend.tools.base import RiskLevel, ToolResult
 from backend.tools.executor import ToolExecutor
 
 logger = logging.getLogger("zauq.actions.service")
+_DEVELOPMENT_SIGNING_KEY = secrets.token_bytes(32)
 
 
 def _get_signing_key() -> bytes:
     """Return HMAC key from INTERNAL_API_KEY or fallback secret."""
-    raw = getattr(settings, "INTERNAL_API_KEY", "") or "zauq_v4_action_signing_secret_key"
-    return raw.encode("utf-8")
+    raw = settings.INTERNAL_API_KEY
+    return raw.encode('utf-8') if raw else _DEVELOPMENT_SIGNING_KEY
 
 
-def generate_action_signature(action_id: str, user_id: str, tool_name: str, expires_at: float) -> str:
+def generate_action_signature(action_id: str, user_id: str, tool_name: str, expires_at: float, arguments=None, guild_id=None, channel_id=None, risk=None) -> str:
     """Generate deterministic HMAC-SHA256 signature for a pending action."""
-    msg = f"{action_id}:{user_id}:{tool_name}:{int(expires_at)}".encode("utf-8")
+    msg = json.dumps([action_id,user_id,tool_name,round(expires_at,6),arguments or {},guild_id,channel_id,risk],sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
     return hmac.new(_get_signing_key(), msg, hashlib.sha256).hexdigest()
 
 
-def verify_action_signature(signature: str, action_id: str, user_id: str, tool_name: str, expires_at: float) -> bool:
+def verify_action_signature(signature: str, action_id: str, user_id: str, tool_name: str, expires_at: float, **kwargs) -> bool:
     """Verify validity of an action signature."""
-    expected = generate_action_signature(action_id, user_id, tool_name, expires_at)
+    expected = generate_action_signature(action_id, user_id, tool_name, expires_at, **kwargs)
     return hmac.compare_digest(signature, expected)
 
 
@@ -54,13 +56,16 @@ class ActionService:
     ) -> PendingAction:
         """Create a new staged pending action with cryptographic signature and expiration."""
         action_id = str(uuid.uuid4())
-        now = time.time()
-        expires_at = now + ttl_seconds
+        now = round(time.time(),6)
+        expires_at = round(now + min(ttl_seconds,300),6)
+        from backend.security.sanitizer import sanitize_object
+        if sanitize_object(arguments) != arguments:
+            raise ValueError('Credentials cannot be stored in pending-action arguments')
 
-        signature = generate_action_signature(action_id, user_id, tool_name, expires_at)
+        signature = generate_action_signature(action_id, user_id, tool_name, expires_at, arguments, guild_id, channel_id, risk)
 
         # Immutability: ensure dict copy
-        safe_arguments = dict(arguments or {})
+        safe_arguments = copy.deepcopy(arguments or {})
 
         action = PendingAction(
             action_id=action_id,
@@ -121,12 +126,17 @@ class ActionService:
             )
 
         # Signature verification if signature provided
+        signature = signature or action.signature
         if signature:
-            if not verify_action_signature(signature, action.action_id, action.user_id, action.tool_name, action.expires_at):
+            if not verify_action_signature(signature, action.action_id, action.user_id, action.tool_name, action.expires_at, arguments=action.arguments,guild_id=action.guild_id,channel_id=action.channel_id,risk=action.risk):
                 logger.warning(f"Signature mismatch on action '{action_id}'.")
                 raise ValueError("Invalid action signature token.")
+        else:
+            raise ValueError('Action has no valid signature; stage a new action')
 
-        updated = await self.store.update_status(action_id, "approved")
+        updated = await self.store.update_status(action_id, "approved", expected_status='pending')
+        if updated is None:
+            raise ValueError('Action changed or expired before approval')
         logger.info(
             f"Action '{action_id}' ({action.tool_name}) APPROVED by user '{user_id}' (admin={is_admin})."
         )
@@ -151,7 +161,9 @@ class ActionService:
                 f"User '{user_id}' is not authorized to deny action initiated by '{action.user_id}'."
             )
 
-        updated = await self.store.update_status(action_id, "denied")
+        updated = await self.store.update_status(action_id, "denied", expected_status='pending')
+        if updated is None:
+            raise ValueError('Action changed or expired before denial')
         logger.info(f"Action '{action_id}' ({action.tool_name}) DENIED by user '{user_id}'.")
         return updated or action
 
@@ -160,7 +172,7 @@ class ActionService:
         action_id: str,
         executor: ToolExecutor,
     ) -> ToolResult:
-        """Execute an approved action exactly once. Transitions status to 'executed'."""
+        """Claim a single approved execution attempt. Transitions status to 'executed'."""
         action = await self.store.get(action_id)
         if not action:
             return ToolResult(
@@ -181,7 +193,22 @@ class ActionService:
             )
 
         # Mark as executed atomically before handler runs to prevent concurrent double-execution
-        await self.store.update_status(action_id, "executed")
+        if not action.signature or not verify_action_signature(action.signature,action.action_id,action.user_id,action.tool_name,action.expires_at,arguments=action.arguments,guild_id=action.guild_id,channel_id=action.channel_id,risk=action.risk):
+            return ToolResult(action.tool_name,False,error='Stored action integrity check failed')
+        spec = executor.registry.get(action.tool_name) if isinstance(executor, ToolExecutor) else None
+        if spec and spec.risk != action.risk:
+            return ToolResult(action.tool_name,False,error='Tool risk changed; stage a new action')
+        if spec and spec.source == 'mcp':
+            from backend.agent.rollout import feature_enabled
+            from backend.memory.db import db_helper
+            profile = await db_helper.get_channel_profile(action.channel_id)
+            guild = await db_helper.get_guild_config(action.guild_id) if action.guild_id else None
+            if not feature_enabled('mcp',action.channel_id,action.guild_id,profile,guild):
+                return ToolResult(action.tool_name,False,error='MCP is disabled for this action scope')
+        claimed = await self.store.update_status(action_id, "executed", expected_status='approved')
+        if claimed is None:
+            return ToolResult(action.tool_name,False,error='Action expired or another caller already claimed execution')
+        action = claimed
 
         logger.info(
             f"Executing approved tool '{action.tool_name}' for action '{action_id}'..."
@@ -204,7 +231,7 @@ class ActionService:
             return ToolResult(
                 tool_name=action.tool_name,
                 success=False,
-                error=f"Execution error: {e}",
+                error="Approved execution failed; this attempt will not be replayed.",
             )
 
 

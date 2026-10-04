@@ -1,3 +1,4 @@
+from backend.memory.usage import record_usage
 import httpx
 import json
 from typing import List, Dict, AsyncGenerator
@@ -42,6 +43,7 @@ class KaggleClient:
             if res.status_code != 200:
                 raise RuntimeError(f"Kaggle API Error ({res.status_code}): {res.text}")
             data = res.json()
+            record_usage('kaggle', payload.get("model", "worker-default"), data)
             return data["choices"][0]["message"]["content"]
 
     async def generate_stream(self, messages: List[Dict[str, str]], system_prompt: str = None, temperature: float = 0.7) -> AsyncGenerator[str, None]:

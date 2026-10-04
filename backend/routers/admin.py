@@ -1,16 +1,24 @@
+import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from backend.memory.metrics import get_metrics_summary
 from backend.memory.db import db_helper
+from backend.middleware.admin_auth import require_admin_token
 
 logger = logging.getLogger("zauq.admin")
 
-router = APIRouter(prefix="/api/admin", tags=["Admin & Privacy"])
+_admin_dep = Depends(require_admin_token)
+
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["Admin & Privacy"],
+    dependencies=[_admin_dep],
+)
 
 @router.get("/config")
-async def get_admin_config(guild_id: str):
+async def get_admin_config(guild_id: str = Query(..., max_length=30)):
     """Returns guild configuration including admin_role_id and default models."""
     if not guild_id or guild_id == "dm":
         return {}
@@ -30,15 +38,15 @@ async def set_admin_role(req: SetRoleRequest):
     return {"status": "success", "guild_id": req.guild_id, "admin_role_id": req.role_id, "data": res}
 
 @router.get("/metrics")
-async def get_metrics(guild_id: Optional[str] = Query(None)):
+async def get_metrics(guild_id: Optional[str] = Query(None, max_length=30)):
     try:
         summary = await get_metrics_summary(guild_id)
         return summary
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Metrics Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Metrics unavailable. Please try again.")
 
 @router.delete("/purge_user_data")
-async def purge_user_data(user_id: str):
+async def purge_user_data(user_id: str = Query(..., max_length=30)):
     if not user_id:
         raise HTTPException(status_code=400, detail="User ID is required.")
 
@@ -83,10 +91,10 @@ async def memory_stats(guild_id: Optional[str] = Query(None)):
         }
     except Exception as e:
         logger.warning(f"Could not fetch memory stats: {e}")
-        return {"user_memories": 0, "server_lore": 0, "source": "error", "detail": str(e)}
+        return {"user_memories": 0, "server_lore": 0, "source": "error", "detail": "Operation failed."}
 
 @router.get("/active_channels")
-async def active_channels(guild_id: Optional[str] = Query(None)):
+async def active_channels(guild_id: Optional[str] = Query(None, max_length=30)):
     """Returns channels that have configured profiles."""
     if not db_helper.supabase:
         return {"channels": [], "source": "no_db"}
@@ -106,10 +114,10 @@ async def active_channels(guild_id: Optional[str] = Query(None)):
         }
     except Exception as e:
         logger.warning(f"Could not fetch active channels: {e}")
-        return {"channels": [], "source": "error", "detail": str(e)}
+        return {"channels": [], "source": "error", "detail": "Operation failed."}
 
 @router.get("/xp_leaderboard")
-async def xp_leaderboard(guild_id: Optional[str] = Query(None), limit: int = Query(10)):
+async def xp_leaderboard(guild_id: Optional[str] = Query(None, max_length=30), limit: int = Query(default=10, ge=1, le=100)):
     """Returns server-wide XP leaderboard."""
     if not db_helper.supabase:
         return {"leaderboard": [], "source": "no_db"}
@@ -129,4 +137,4 @@ async def xp_leaderboard(guild_id: Optional[str] = Query(None), limit: int = Que
         }
     except Exception as e:
         logger.warning(f"Could not fetch XP leaderboard: {e}")
-        return {"leaderboard": [], "source": "error", "detail": str(e)}
+        return {"leaderboard": [], "source": "error", "detail": "Operation failed."}

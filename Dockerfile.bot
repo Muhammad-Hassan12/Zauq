@@ -1,6 +1,6 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Install system dependencies (e.g. ffmpeg if voice features are ever added)
+# Install system dependencies (e.g. ffmpeg for voice features)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg && \
     rm -rf /var/lib/apt/lists/*
@@ -12,7 +12,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
-COPY . .
+COPY backend ./backend
+COPY bot ./bot
+
+# Create dedicated non-root user and hand over ownership
+RUN adduser --disabled-password --no-create-home --uid 1000 zauq \
+    && chown -R zauq:zauq /app
+USER zauq
 
 # Run the Discord Bot
 CMD ["python", "-m", "bot.client"]

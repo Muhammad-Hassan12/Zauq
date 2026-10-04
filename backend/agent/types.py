@@ -9,6 +9,7 @@ class ToolCall:
     id: str               # provider-issued call ID
     name: str             # canonical tool name (e.g. "web.search")
     arguments: dict[str, Any] = field(default_factory=dict)
+    provider_call_id: str | None = None
 
 
 @dataclass
@@ -24,6 +25,7 @@ class ToolResultMessage:
     tool_name: str
     content: str          # serialized result (truncated if needed)
     is_error: bool = False
+    provider_call_id: str | None = None
 
     @property
     def name(self) -> str:
@@ -37,6 +39,7 @@ class ToolResultMessage:
             "name": self.tool_name,
             "content": self.content,
             "is_error": self.is_error,
+            "provider_call_id": self.provider_call_id,
         }
 
 
@@ -46,6 +49,7 @@ class AgentModelTurn:
     text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     raw_metadata: dict[str, Any] = field(default_factory=dict)
+    provider_continuation: dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_tool_calls(self) -> bool:

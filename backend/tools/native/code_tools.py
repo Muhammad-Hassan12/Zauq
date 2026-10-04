@@ -46,7 +46,7 @@ _CODE_EXECUTE_SPEC = ToolSpec(
     },
     source="native",
     risk="privileged",
-    timeout_seconds=30.0,
+    timeout_seconds=40.0,
     enabled=True,
 )
 

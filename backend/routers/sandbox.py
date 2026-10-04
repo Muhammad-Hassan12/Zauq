@@ -13,6 +13,7 @@ from typing import Optional, Literal, Dict, Any
 
 from backend.sandbox.code_runner import execute_code, get_sandbox_status
 from backend.memory.db import db_helper
+from backend.sandbox.policy import execution_permission
 
 logger = logging.getLogger("zauq.sandbox")
 
@@ -20,10 +21,11 @@ router = APIRouter(prefix="/api/sandbox", tags=["Code Sandbox"])
 
 
 class CodeExecRequest(BaseModel):
-    code: str
+    code: str = Field(max_length=50000)
     language: Optional[Literal["python", "javascript", "node", "js", "bash", "sh"]] = "python"
     timeout: Optional[float] = Field(default=8.0, ge=1.0, le=30.0)
     channel_id: Optional[str] = None
+    guild_id: Optional[str] = None
 
 
 class AutoModeRequest(BaseModel):
@@ -63,9 +65,12 @@ async def run_code(req: CodeExecRequest):
     """Execute code in isolated Docker sandbox with strict permission enforcement."""
     # Fix permission semantics per v4: explicit allow_code_exec=False MUST win
     # Do not implicitly override false permission merely because channel is in Dev Mode
+    if not req.channel_id:
+        raise HTTPException(status_code=403, detail='A configured channel context is required for execution.')
     if req.channel_id:
         channel_profile = await db_helper.get_channel_profile(req.channel_id)
-        if channel_profile and not channel_profile.get("allow_code_exec", False):
+        guild_config = await db_helper.get_guild_config(req.guild_id) if req.guild_id else None
+        if not execution_permission(channel_profile, (guild_config or {}).get('default_mode', 'hangout')):
             raise HTTPException(
                 status_code=403,
                 detail="Code execution is disabled for this channel. Enable allow_code_exec to run code.",

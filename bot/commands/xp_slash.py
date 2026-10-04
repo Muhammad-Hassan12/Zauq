@@ -38,7 +38,6 @@ class XPSlash(commands.Cog):
                 embed.add_field(name="Level", value=f"**Level {level}**", inline=True)
                 embed.add_field(name="Total XP", value=f"**{xp} XP**", inline=True)
 
-                # Progress bar calculation
                 next_level_xp = ((level) ** 2) * 100
                 current_level_base = ((level - 1) ** 2) * 100 if level > 1 else 0
                 needed = next_level_xp - current_level_base

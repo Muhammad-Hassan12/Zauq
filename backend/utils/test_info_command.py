@@ -1,4 +1,6 @@
 import asyncio
+from backend.version import ZAUQ_VERSION
+from backend.config import settings
 from backend.routers.model import get_full_system_info
 
 async def run_info_tests():
@@ -17,6 +19,8 @@ async def run_info_tests():
 
     # 2. Verify Engine & Attribution
     engine = info_data["engine"]
+    assert engine["version"] == ZAUQ_VERSION
+    assert info_data["limits"]["sandbox_timeout_s"] == settings.SANDBOX_DEFAULT_TIMEOUT_SECONDS
     assert engine["name"] == "Zauq (ذوق)", f"Incorrect name: {engine['name']}"
     assert "Syed Muhammad Hassan" in engine["creator"], f"Incorrect creator: {engine['creator']}"
     assert "Apache" in engine["license"], f"Incorrect license: {engine['license']}"
@@ -40,7 +44,7 @@ async def run_info_tests():
 
     # 4. Verify Capabilities Subsystems
     caps = info_data["capabilities"]
-    assert "Deep Web Roaming" in caps["web_search"], "Missing Deep Web Roaming in search"
+    assert "Serper" in caps["web_search"], "Missing Serper in search status"
     assert "19 Voices" in caps["voice_tts"], "Missing 19 voices in TTS"
     assert "pgvector" in caps["memory"], "Missing pgvector in memory"
     print(f"   Search Subsystem: {caps['web_search']}")

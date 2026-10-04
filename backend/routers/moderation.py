@@ -1,6 +1,6 @@
 import asyncio
 import hashlib
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from backend.moderation.content_filter import content_filter
@@ -34,7 +34,7 @@ async def check_content(req: ModerationCheckRequest):
 
     if classification != "safe" and db_helper.supabase:
         action = "deleted" if classification == "toxic" else "flagged"
-        # Store only a content hash — never persist raw toxic message text
+        # Store only a content hash... never persist raw toxic message text
         content_hash = hashlib.sha256(req.message_content[:500].encode()).hexdigest()[:32]
         payload = {
             "guild_id": req.guild_id,
@@ -75,7 +75,7 @@ async def update_moderation_settings(req: ModerationSettingsRequest):
     return {"status": "success", "data": res.data}
 
 @router.get("/log")
-async def get_moderation_log(guild_id: str, limit: int = 10):
+async def get_moderation_log(guild_id: str = Query(..., max_length=30), limit: int = Query(default=10, ge=1, le=100)):
     if not db_helper.supabase:
         return {"logs": []}
 

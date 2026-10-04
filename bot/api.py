@@ -1,7 +1,3 @@
-"""
-Shared HTTP client helper for all bot → backend API calls.
-Centralises the base URL and auth header in one place.
-"""
 import httpx
 from backend.config import settings
 

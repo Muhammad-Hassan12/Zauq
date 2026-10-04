@@ -138,7 +138,8 @@ async def test_attachment_parsing_and_context_injection(mock_background_tasks, m
         assert res["response"] == "Requirements reviewed successfully."
         passed_messages = mock_gen.call_args[1].get("messages") or mock_gen.call_args[0][0]
         last_msg = passed_messages[-1]["content"]
-        assert "[Attached Document: requirements.txt]" in last_msg
+        assert "[BEGIN UNTRUSTED EXTERNAL DATA (Attached Document: requirements.txt)]" in last_msg
+        assert "[END UNTRUSTED EXTERNAL DATA (Attached Document: requirements.txt)]" in last_msg
         assert "PROJECT REQUIREMENTS:" in last_msg
 
 
@@ -247,4 +248,4 @@ async def test_chat_timeout_handling(mock_background_tasks, monkeypatch):
 
         with pytest.raises(Exception) as exc_info:
             await chat_completion(req, mock_background_tasks)
-        assert exc_info.value.status_code == 500
+        assert exc_info.value.status_code == 504

@@ -48,7 +48,8 @@ async def execute_and_send_result(
         "code": code,
         "language": language,
         "timeout": 5.0,
-        "channel_id": channel_id
+        "channel_id": channel_id,
+        "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
     }
 
     try:
@@ -126,7 +127,6 @@ class CodeEditorModal(discord.ui.Modal):
 class ExecSlash(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # Register Context Menu App Command
         self.ctx_menu = app_commands.ContextMenu(
             name="Run Code Snippet",
             callback=self.run_code_context_menu

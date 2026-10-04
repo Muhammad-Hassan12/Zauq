@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from backend.config import settings
@@ -14,15 +15,43 @@ from backend.routers import (
 )
 
 setup_logging()
+logger = logging.getLogger("zauq.main")
+
+# Safe module-level registration for test & tool discovery, also ensured in lifespan
+try:
+    from backend.tools.native.web_tools import register_web_tools
+    register_web_tools()
+except Exception as _e:
+    logger.debug(f"Initial web tools registration deferred to lifespan: {_e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: launch background workers. Shutdown: cancel them cleanly."""
+    if not settings.INTERNAL_API_KEY and not settings.DEVELOPMENT_MODE:
+        raise RuntimeError('INTERNAL_API_KEY is required unless DEVELOPMENT_MODE=true.')
+
+    # Register native tools at startup (not at import time) so errors surface cleanly
+    from backend.tools.native.web_tools import register_web_tools
+    try:
+        register_web_tools()
+    except Exception as e:
+        logger.error(f"Failed to register web tools: {e}")
+        raise
+
     cleanup_task = asyncio.create_task(temp_file_manager.cleanup_loop())
     memory_decay_task = asyncio.create_task(start_memory_decay_worker())
+    async def cleanup_actions():
+        from backend.actions.service import action_service
+        while True:
+            try:
+                await action_service.store.cleanup_expired()
+            except Exception as exc:
+                logger.debug(f"Action store cleanup error (non-critical): {exc}")
+            await asyncio.sleep(60)
+    action_cleanup_task = asyncio.create_task(cleanup_actions())
 
-    # ── v4 Phase 6: MCP Client Lifecycle ──────────────────────────────────────
+    # ── v4: MCP Client Lifecycle ──────────────────────────────────────
     if settings.MCP_ENABLED:
         from backend.mcp_client.manager import mcp_manager
         await mcp_manager.start()
@@ -36,7 +65,8 @@ async def lifespan(app: FastAPI):
 
     cleanup_task.cancel()
     memory_decay_task.cancel()
-    for task in [cleanup_task, memory_decay_task]:
+    action_cleanup_task.cancel()
+    for task in [cleanup_task, memory_decay_task, action_cleanup_task]:
         try:
             await task
         except asyncio.CancelledError:

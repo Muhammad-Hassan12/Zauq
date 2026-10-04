@@ -1,134 +1,50 @@
-# Contributing to Zauq (ذوق) v4.0.0
+# Contributing to Zauq
 
-First off, thank you for considering contributing to Zauq! We welcome contributions that keep Zauq reliable, secure, maintainable, and powerful.
+Read [ARCHITECTURE.md](ARCHITECTURE.md), the relevant phase in [v4-Update.md](v4-Update.md), and existing tests before changing behavior. Keep Discord delivery, orchestration, providers, tools and sandbox execution in their established layers. Finish a phase with passing checks and a short changelog before starting the next.
 
----
+## Development
 
-## 🚀 Getting Started
-
-### 1. Prerequisites
-* **Python 3.11+**
-* **Docker Engine** (Required for code execution sandboxing tests)
-* **Discord Bot Token** (Create an app in the [Discord Developer Portal](https://discord.com/developers/applications))
-* **Git**
-
-### 2. Local Setup
-
-1. **Fork and Clone**:
-   ```bash
-   git clone https://github.com/YOUR-USERNAME/Zauq.git
-   cd Zauq
-   ```
-
-2. **Set Up Python Virtual Environment**:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   pip install pytest pytest-asyncio pytest-cov
-   ```
-
-3. **Configure Environment Variables**:
-   ```bash
-   cp .env.example .env
-   ```
-   Fill in your API credentials. During local development, feature flags can remain `false` by default.
-
-4. **Run Services**:
-   * **Using Docker Compose (Recommended)**:
-     ```bash
-     docker compose up --build
-     ```
-   * **Or Manually (Multi-Terminal)**:
-     ```bash
-     # Terminal 1: Sandbox Runner (Optional isolated mode)
-     python -m uvicorn backend.sandbox.runner_service:app --port 8001 --reload
-
-     # Terminal 2: FastAPI Backend Engine
-     python -m uvicorn backend.main:app --port 8002 --reload
-
-     # Terminal 3: Discord Bot Client
-     python -m bot.client
-     ```
-
----
-
-## 🧪 Testing Guidelines
-
-Zauq v4 includes a modern, 7-stage test suite organized under `tests/` with 100% offline, deterministic coverage (zero paid LLM API calls in CI).
-
-### Running All Tests
-```bash
-pytest tests/ -v
-```
-
-### Running Test Stages Individually
+Use Python 3.11/3.12 and install `requirements.txt` in a virtual environment. Copy `.env.example` only for manual development; never commit credentials or an operator MCP config. Tests deliberately disable `.env`, clear external credentials and refuse external socket connections. Mock paid providers explicitly, including the credentials required to reach a mocked transport.
 
 ```bash
-# 1. Unit Tests (Agent Runtime, Tool System, Models)
-pytest tests/agent/ tests/tools/ tests/models/ -v
-
-# 2. Search Subsystem (Query Optimizer, Research v2)
-pytest tests/search/ -v
-
-# 3. Model Context Protocol (MCP Client & Adapters)
-pytest tests/mcp/ -v
-
-# 4. Security Hardening (SSRF, Secret Sanitization, Prompt Injection)
-pytest tests/security/ -v
-
-# 5. Docker Sandbox Tests (Timeout, Concurrency, Permission Semantics)
-pytest tests/sandbox/ -v
-
-# 6. Integration & Regression Checklist Tests
-pytest tests/integration/ tests/observability/ tests/actions/ tests/bot/ tests/chat/ -v
+python -m pytest -q
+python -m compileall -q backend bot tests
+pip check
 ```
 
-### Legacy Utility Suites (Backward Compatibility)
+Tests live in `tests/`; historical utility probes in `backend/utils/` are not a replacement for pytest and may require deliberate runtime setup. The real MCP stdio and HTTP fixtures are owned by `tests/mcp/fixtures/`.
+
+## External integration gates
+
+PostgreSQL tests create and remove disposable `zauq_test_*` databases on a loopback-only cluster. Use an isolated cluster with an administrative test role, never a deployment database:
+
 ```bash
-python -m backend.utils.test_security_hardening
-python -m backend.utils.test_sandbox_suite
-python -m backend.utils.test_deep_search
-python -m backend.utils.test_info_command
-python -m backend.utils.test_reply_ingestion
+ZAUQ_TEST_POSTGRES_DSN=postgresql://postgres:test-password@127.0.0.1:5432/postgres python -m pytest tests/memory -q
 ```
 
----
+The CI PostgreSQL image contains pgvector. Set `ZAUQ_REQUIRE_PGVECTOR=true` to fail rather than skip the fresh-schema gate when that extension is absent. Tests cover fresh-schema reruns, ordered existing-install upgrades, early boolean repair, provider constraints, RLS and metrics RPC execution.
 
-## 📐 Architecture & Coding Invariants
+For real Docker tests, pre-pull the images listed in deployment docs, then opt in:
 
-When adding new features or tools to Zauq v4, strictly maintain these core invariants:
+```bash
+ZAUQ_RUN_DOCKER_TESTS=true python -m pytest tests/sandbox/test_real_docker.py -q
+```
 
-1. **Tool System Contracts (`backend/tools/`)**:
-   * Every tool must define a `ToolSpec` with canonical naming (`category.action` or `mcp.<server>.<action>`).
-   * Tools must declare an explicit `RiskLevel` (`read`, `write`, `destructive`, `privileged`).
-   * Any tool with `write` or `destructive` risk **must require human approval** via the `ActionService`.
+These tests verify mounted code, the execution UID, blocked networking and container removal after cancellation. They require a Docker-capable test identity. CI additionally builds the separate images and checks bot-to-backend connectivity and backend-to-runner host mounts. A skipped integration gate is unverified, not passed.
 
-2. **Bounded Execution (`backend/agent/`)**:
-   * Never introduce unbounded recursive autonomous loops.
-   * Tool calls are strictly bounded by `AgentBudget` (max 4 steps normal, max 6 steps deep search).
-   * Repeated identical tool calls must trigger the loop detection guard.
+## Invariants
 
-3. **Security & Untrusted Data Fencing (`backend/security/`)**:
-   * All external web content, document attachments, and MCP outputs are **untrusted data**.
-   * Tools must fence observations using `fence_tool_data()`.
-   * Never leak API keys, tokens, or credentials into model context or user responses. Always route outputs through `sanitize_secrets()`.
+- Register tool schemas and valid aliases atomically; reject remote schema references. Validate arguments before dispatch.
+- Enforce request selection, guild scope, master flags and channel execution permissions independently of model instructions. Omitted MCP scope and newly discovered ungranted tools must deny access.
+- Treat documents, web content and MCP output as untrusted data. Keep them out of authorization/relevance decisions.
+- Preserve provider-native signed/opaque continuation blocks without displaying or logging private reasoning. Do not imitate native thinking with a hidden prose instruction.
+- Respect total deadlines, global/configured tool caps and per-resource limits. Keep cancellation cleanup and bounded output streaming intact.
+- Write/destructive tools require signed approval. Claim execution atomically before the handler, recheck current policy and never replay a claimed action after an uncertain outcome.
+- Keep search ownership in chat orchestration and `SearchService`. Do not add hidden provider-side searches to standard chat preprocessing.
+- Sanitize downloadable bytes as well as previews. Credentials belong in trusted transport configuration, never model arguments or action previews.
+- Persist truthful telemetry. Unknown usage/rates remain unknown; model estimates exclude unrelated external charges.
+- Add numbered idempotent migrations and keep the fresh schema consistent. Preserve existing channel preferences during unrelated updates.
 
-4. **Zero Overhead When Disabled**:
-   * Subsystems governed by feature flags (`AGENT_RUNTIME_ENABLED`, `MCP_ENABLED`) must consume zero background resources when disabled.
+## Pull requests
 
----
-
-## 📝 Submitting a Pull Request
-
-1. Create a feature branch:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-2. Commit your changes with clear, descriptive commit messages.
-3. Verify that the complete test suite passes:
-   ```bash
-   pytest tests/
-   ```
-4. Open a Pull Request on GitHub describing your changes and testing methodology.
+Describe the concrete trigger, previous behavior and resulting behavior. Include the relevant tests and any external gate that remains unverified. Update examples, privacy disclosures and user guidance when their behavior changes. Avoid unrelated refactors, new heavyweight services or claims of live readiness based only on mocks. Preserve feature flags off by default.

@@ -66,7 +66,8 @@ class TestModelRouterDispatching:
             )
 
     @pytest.mark.asyncio
-    async def test_vision_fallback_for_non_vision_model(self):
+    async def test_vision_fallback_for_non_vision_model(self, monkeypatch):
+        monkeypatch.setattr(settings, "DO_MODEL_ACCESS_KEY", "test-do-key")
         # DigitalOcean does not support vision natively, so vision fallback should be called
         with patch.object(model_router, "_handle_vision_fallback", new_callable=AsyncMock) as mock_vision:
             with patch.object(model_router.do_client, "generate", new_callable=AsyncMock) as mock_gen:

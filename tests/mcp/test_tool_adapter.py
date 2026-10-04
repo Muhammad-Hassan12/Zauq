@@ -102,3 +102,46 @@ def test_format_mcp_result_structured():
     res = DummyCallToolResult(structured_content={"total_count": 42, "items": ["a", "b"]})
     out = format_mcp_result(res)
     assert out == {"total_count": 42, "items": ["a", "b"]}
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_integration_with_tool_registry_and_executor():
+    from backend.tools.registry import ToolRegistry
+    from backend.tools.executor import ToolExecutor
+    from backend.tools.policy import ToolPolicy
+
+    registry = ToolRegistry()
+    mock_call_tool = AsyncMock(
+        return_value=DummyCallToolResult(
+            content=[DummyTextContent("Integration success: 42 records found")]
+        )
+    )
+    server_cfg = MCPServerConfig(
+        id="analytics",
+        transport="streamable_http",
+        url="https://mcp.internal/api",
+        default_risk="read",
+        allowed_tools=["query_stats"],
+        allowed_guild_ids=["guild_123"],
+    )
+    mcp_tool = DummyMCPTool(
+        name="query_stats",
+        description="Query server statistics",
+        input_schema={"type": "object", "properties": {"metric": {"type": "string"}}},
+    )
+    spec = mcp_tool_to_spec(mcp_tool, server_cfg, mock_call_tool)
+    handler = create_mcp_handler(mock_call_tool, "query_stats")
+    registry.register(spec, handler)
+
+    policy = ToolPolicy()
+    executor = ToolExecutor(registry, policy)
+
+    exec_result = await executor.execute(
+        tool_name="mcp.analytics.query_stats",
+        arguments={"metric": "active_users"},
+        guild_id="guild_123",
+    )
+    assert exec_result.success is True
+    assert "Integration success: 42 records found" in str(exec_result.content)
+    mock_call_tool.assert_awaited_once_with("query_stats", {"metric": "active_users"})
+

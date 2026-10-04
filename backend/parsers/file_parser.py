@@ -80,7 +80,7 @@ def parse_excel(content_bytes: bytes, filename: str) -> str:
             markdown_rows = []
             markdown_rows.append("| " + " | ".join(rows[0]) + " |")
             markdown_rows.append("| " + " | ".join(["---"] * len(rows[0])) + " |")
-            for r in rows[1:100]:  # Limit to first 100 rows
+            for r in rows[1:100]:
                 markdown_rows.append("| " + " | ".join(r) + " |")
             return "\n".join(markdown_rows)
         except Exception as e:
@@ -89,7 +89,7 @@ def parse_excel(content_bytes: bytes, filename: str) -> str:
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content_bytes), data_only=True)
         sheets_output = []
-        for sheet_name in wb.sheetnames[:3]:  # Max 3 sheets
+        for sheet_name in wb.sheetnames[:3]:
             sheet = wb[sheet_name]
             rows = list(sheet.iter_rows(values_only=True))
             if not rows:
@@ -98,7 +98,7 @@ def parse_excel(content_bytes: bytes, filename: str) -> str:
             header = [str(c or "") for c in rows[0]]
             sheets_output.append("| " + " | ".join(header) + " |")
             sheets_output.append("| " + " | ".join(["---"] * len(header)) + " |")
-            for r in rows[1:50]:  # Limit to 50 rows per sheet
+            for r in rows[1:50]:
                 row_str = [str(c or "") for c in r]
                 sheets_output.append("| " + " | ".join(row_str) + " |")
         return "\n\n".join(sheets_output) if sheets_output else "[Excel workbook is empty]"
@@ -179,6 +179,10 @@ def extract_generated_files(response_text: str) -> Tuple[str, List[Dict[str, Any
     """
     if not response_text:
         return response_text, []
+
+    # Encode only sanitized content, so download bytes match the visible preview.
+    from backend.security.sanitizer import sanitize_secrets
+    response_text = sanitize_secrets(response_text)
 
     files = []
     seen_filenames = set()

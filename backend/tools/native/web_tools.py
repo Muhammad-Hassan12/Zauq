@@ -69,6 +69,8 @@ async def _web_search_handler(args: dict) -> dict:
         "category": resp.category,
         "provider": resp.provider,
         "from_cache": resp.from_cache,
+        "search_calls": resp.search_calls,
+        "error": resp.error,
         "results": [
             {
                 "title": r.title,

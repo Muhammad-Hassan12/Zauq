@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+from jsonschema import Draft202012Validator
 from typing import Callable, Awaitable, Any
 from backend.tools.base import ToolSpec, RiskLevel
 from backend.tools.aliases import AliasMap
@@ -44,9 +45,22 @@ class ToolRegistry:
                 f"Tool '{spec.name}' is already registered. "
                 "Each tool must have a unique canonical name."
             )
+        Draft202012Validator.check_schema(spec.input_schema)
+        def check_refs(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key in ('$ref', '$dynamicRef', '$recursiveRef') and (not isinstance(child, str) or not child.startswith('#')):
+                        raise ValueError('Remote schema references are prohibited')
+                    check_refs(child)
+            elif isinstance(value, list):
+                for child in value:
+                    check_refs(child)
+        check_refs(spec.input_schema)
+        if spec.risk not in _RISK_ORDER or spec.timeout_seconds <= 0:
+            raise ValueError('Invalid risk or timeout')
+        self.aliases.register(spec.name)
         self._specs[spec.name] = spec
         self._handlers[spec.name] = handler
-        self.aliases.register(spec.name)
         logger.debug(f"Registered tool: '{spec.name}' (risk={spec.risk}, source={spec.source})")
 
     def unregister(self, name: str) -> bool:
@@ -149,5 +163,5 @@ class ToolRegistry:
         return self.get(name) is not None
 
 
-# Module-level singleton — import and use this everywhere in Zauq
+# Module-level singleton... import and use this everywhere in Zauq
 tool_registry = ToolRegistry()

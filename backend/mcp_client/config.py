@@ -1,5 +1,3 @@
-"""Configuration loader and environment-variable interpolator for MCP servers."""
-
 from __future__ import annotations
 import os
 import re
@@ -57,7 +55,7 @@ def load_mcp_config(config_path: str | Path | None = None) -> MCPConfigFile:
     try:
         config = MCPConfigFile.model_validate(interpolated)
     except Exception as e:
-        logger.error(f"Invalid MCP configuration structure in '{path_to_load}': {e}")
+        logger.error('Invalid MCP configuration structure (values withheld)')
         return MCPConfigFile(servers=[])
 
     # Enforce MCP_MAX_SERVERS
@@ -71,7 +69,15 @@ def load_mcp_config(config_path: str | Path | None = None) -> MCPConfigFile:
 
     # Validate per-server transport requirements
     valid_servers: list[MCPServerConfig] = []
+    seen = set()
     for s in config.servers:
+        if s.id in seen:
+            logger.warning('Duplicate MCP server ID skipped: %s', s.id)
+            continue
+        seen.add(s.id)
+        if s.enabled and not s.allowed_guild_ids and not s.allow_global_access:
+            logger.warning('MCP server %s skipped: explicit access scope is required', s.id)
+            continue
         if s.transport == "streamable_http":
             if not s.url:
                 logger.warning(f"Server '{s.id}' skipped: transport is 'streamable_http' but no 'url' provided.")
@@ -79,7 +85,7 @@ def load_mcp_config(config_path: str | Path | None = None) -> MCPConfigFile:
             from backend.security.ssrf import validate_mcp_endpoint_url
             valid_url, err_msg = validate_mcp_endpoint_url(s.url, allow_operator_private=True)
             if not valid_url:
-                logger.warning(f"Server '{s.id}' skipped: invalid URL '{s.url}': {err_msg}")
+                logger.warning('MCP server %s skipped: invalid endpoint', s.id)
                 continue
         if s.transport == "stdio" and not s.command:
             logger.warning(f"Server '{s.id}' skipped: transport is 'stdio' but no 'command' provided.")

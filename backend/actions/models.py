@@ -1,5 +1,3 @@
-"""Models and schemas for Phase 7: Side-Effect Approval / Human-in-the-Loop."""
-
 from __future__ import annotations
 import time
 from typing import Any, Literal
@@ -47,7 +45,7 @@ class ActionCreateRequest(BaseModel):
 class ActionApproveRequest(BaseModel):
     """Payload to approve a pending action."""
     user_id: str
-    signature: str | None = None
+    signature: str = Field(min_length=64,max_length=64)
     is_admin: bool = False
 
 

@@ -18,7 +18,6 @@ logger = logging.getLogger("zauq.routers.actions")
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
 
-# Shared default executor for approved action execution
 _executor = ToolExecutor(tool_registry, ToolPolicy())
 
 
@@ -65,7 +64,6 @@ async def approve_and_execute_action(
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
-    # Execute the action immediately upon valid approval
     tool_result = await action_service.execute_approved_action(action_id, _executor)
 
     return {

@@ -1,7 +1,8 @@
-"""Discord UI components for Human-in-the-Loop side-effect approval (Phase 7)."""
+"""Discord UI components for Human-in-the-Loop side-effect approval."""
 
 import logging
 import json
+import io
 import discord
 from typing import Any, Optional
 from bot.api import BACKEND_URL, api_client
@@ -20,6 +21,7 @@ class ActionConfirmationView(discord.ui.View):
         arguments: dict[str, Any],
         risk: str = "write",
         timeout: float = 300.0,
+        signature: Optional[str] = None,
     ) -> None:
         super().__init__(timeout=timeout)
         self.action_id = action_id
@@ -27,6 +29,7 @@ class ActionConfirmationView(discord.ui.View):
         self.tool_name = tool_name
         self.arguments = arguments
         self.risk = risk
+        self.signature = signature
         self.message: Optional[discord.Message] = None
 
     def build_preview_embed(self) -> discord.Embed:
@@ -43,10 +46,11 @@ class ActionConfirmationView(discord.ui.View):
         embed.add_field(name="Risk Level", value=f"`{self.risk.upper()}`", inline=True)
         embed.add_field(name="Initiated By", value=f"<@{self.initiator_id}>", inline=True)
 
-        # Truncate and format arguments
-        args_str = json.dumps(self.arguments, indent=2)
+        from backend.security.sanitizer import sanitize_object
+        args_str = json.dumps(sanitize_object(self.arguments), indent=2)
         if len(args_str) > 1000:
             args_str = args_str[:1000] + "\n...[truncated]"
+            embed.description += '\nUse **Review arguments** to download the complete payload before approving.'
         embed.add_field(
             name="Proposed Arguments",
             value=f"```json\n{args_str}\n```",
@@ -54,6 +58,12 @@ class ActionConfirmationView(discord.ui.View):
         )
         embed.set_footer(text=f"Action ID: {self.action_id} • Expires in 5 minutes")
         return embed
+
+    @discord.ui.button(label='Review arguments', style=discord.ButtonStyle.secondary)
+    async def review_arguments(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from backend.security.sanitizer import sanitize_object
+        data = json.dumps(sanitize_object(self.arguments), indent=2, ensure_ascii=False).encode('utf-8')
+        await interaction.response.send_message(file=discord.File(io.BytesIO(data),filename='proposed-action.json'),ephemeral=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Enforce that only the initiating user or server administrator can act."""
@@ -78,11 +88,13 @@ class ActionConfirmationView(discord.ui.View):
             is_admin = interaction.user.guild_permissions.administrator
 
         try:
-            res = await api_client.post(
+            async with api_client(timeout=40.0) as client:
+                res = await client.post(
                 f"{BACKEND_URL}/api/actions/{self.action_id}/approve",
                 json={
                     "user_id": str(interaction.user.id),
                     "is_admin": is_admin,
+                    'signature':self.signature,
                 },
                 timeout=30.0,
             )
@@ -138,7 +150,8 @@ class ActionConfirmationView(discord.ui.View):
             is_admin = interaction.user.guild_permissions.administrator
 
         try:
-            res = await api_client.post(
+            async with api_client(timeout=10.0) as client:
+                res = await client.post(
                 f"{BACKEND_URL}/api/actions/{self.action_id}/deny",
                 json={
                     "user_id": str(interaction.user.id),
@@ -147,6 +160,9 @@ class ActionConfirmationView(discord.ui.View):
                 timeout=10.0,
             )
 
+            if res.status_code != 200:
+                await interaction.followup.send('The backend rejected this denial. Check the action status before trying again.', ephemeral=True)
+                return
             # Disable all buttons
             for child in self.children:
                 child.disabled = True

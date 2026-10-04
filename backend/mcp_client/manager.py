@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from contextlib import AsyncExitStack
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, Awaitable, Optional
 
 from backend.config import settings
 from backend.tools.registry import ToolRegistry, tool_registry
@@ -41,6 +41,8 @@ class ServerConnection:
         self._max_backoff: float = 60.0
         self.consecutive_failures: int = 0
         self.max_consecutive_failures: int = 5
+        self.ready = asyncio.Event()
+        self.reconnect = asyncio.Event()
 
 
 _mcp_call_semaphore: Optional[asyncio.Semaphore] = None
@@ -125,6 +127,46 @@ class MCPManager:
             logger.info("MCP Manager stopped.")
 
     async def _connect_server(self, conn: ServerConnection) -> bool:
+        """Start a connection owner; MCP exit scopes stay in their opening task."""
+        if not conn._reconnect_task or conn._reconnect_task.done():
+            conn.ready.clear()
+            conn._reconnect_task = asyncio.create_task(self._connection_worker(conn))
+        await conn.ready.wait()
+        return conn.status.connected
+
+    async def _connection_worker(self, conn):
+        try:
+            while self._running and conn.config.enabled and conn.consecutive_failures < conn.max_consecutive_failures:
+                conn.reconnect.clear()
+                connected = False
+                try:
+                    async with asyncio.timeout(conn.config.timeout_seconds):
+                        connected = await self._connect_once(conn)
+                except Exception as exc:
+                    conn.consecutive_failures += 1
+                    conn.status.error = f'Connection failed ({type(exc).__name__})'
+                finally:
+                    conn.ready.set()
+                if connected:
+                    while not conn.reconnect.is_set():
+                        try:
+                            await asyncio.wait_for(conn.reconnect.wait(), timeout=30)
+                        except asyncio.TimeoutError:
+                            try:
+                                await asyncio.wait_for(conn.session.send_ping(), conn.config.timeout_seconds)
+                            except Exception:
+                                conn.status.error = 'Connection health check failed'
+                                break
+                await self._close_connection(conn)
+                if conn.consecutive_failures >= conn.max_consecutive_failures:
+                    break
+                await asyncio.sleep(conn._backoff_seconds)
+                conn._backoff_seconds = min(conn._backoff_seconds * 1.5, conn._max_backoff)
+        finally:
+            conn.ready.set()
+            await self._close_connection(conn)
+
+    async def _connect_once(self, conn: ServerConnection) -> bool:
         """Connect to an individual MCP server with failure isolation."""
         conn.status.connected = False
         conn.status.error = None
@@ -137,6 +179,7 @@ class MCPManager:
             from mcp.client.session import ClientSession
 
             stack = AsyncExitStack()
+            conn.stack = stack
 
             if conn.config.transport == "streamable_http":
                 from mcp.client.streamable_http import streamable_http_client
@@ -144,8 +187,10 @@ class MCPManager:
                     raise ValueError(f"Server '{conn.config.id}' missing required URL for streamable_http.")
                 
                 # Streamable HTTP client context
+                import httpx2
+                http_client = await stack.enter_async_context(httpx2.AsyncClient(headers=conn.config.headers, timeout=conn.config.timeout_seconds, follow_redirects=False, trust_env=False))
                 streams = await stack.enter_async_context(
-                    streamable_http_client(conn.config.url)
+                    streamable_http_client(conn.config.url, http_client=http_client)
                 )
                 session = await stack.enter_async_context(
                     ClientSession(streams[0], streams[1])
@@ -190,9 +235,9 @@ class MCPManager:
 
         except Exception as e:
             conn.status.connected = False
-            conn.status.error = str(e)
+            conn.status.error = f'Connection failed ({type(e).__name__})'
             conn.consecutive_failures += 1
-            logger.warning(f"Failed to connect to MCP server '{conn.config.id}' (attempt {conn.consecutive_failures}): {e}")
+            logger.warning('MCP server %s connection attempt %s failed (%s)', conn.config.id, conn.consecutive_failures, type(e).__name__)
             if conn.stack:
                 try:
                     await conn.stack.aclose()
@@ -203,31 +248,20 @@ class MCPManager:
 
             # Circuit breaker: pause reconnect loop on repeated failures to prevent retry storms
             if conn.consecutive_failures >= conn.max_consecutive_failures:
-                if conn._reconnect_task and not conn._reconnect_task.done():
-                    conn._reconnect_task.cancel()
-                    conn._reconnect_task = None
                 logger.warning(
                     f"MCP server '{conn.config.id}' exceeded max consecutive failures ({conn.consecutive_failures}). "
                     "Pausing background reconnection until explicit refresh to protect host."
                 )
-            elif self._running and conn.config.enabled:
-                self._schedule_reconnect(conn)
 
             return False
 
     def _schedule_reconnect(self, conn: ServerConnection) -> None:
         """Schedule a background reconnection with bounded exponential backoff."""
-        if conn._reconnect_task and not conn._reconnect_task.done():
-            return
-
-        async def _reconnect_loop():
-            await asyncio.sleep(conn._backoff_seconds)
-            conn._backoff_seconds = min(conn._backoff_seconds * 1.5, conn._max_backoff)
-            if self._running and not conn.status.connected:
-                logger.info(f"Attempting reconnection to MCP server '{conn.config.id}'...")
-                await self._connect_server(conn)
-
-        conn._reconnect_task = asyncio.create_task(_reconnect_loop())
+        conn.status.connected = False
+        self.registry.unregister_by_server(conn.config.id)
+        conn.cached_tools.clear()
+        conn.status.tools = 0
+        conn.reconnect.set()
 
     async def _discover_and_register_tools(self, conn: ServerConnection) -> None:
         """Discover tools once, normalize, cache in memory, and register into ToolRegistry."""
@@ -248,10 +282,11 @@ class MCPManager:
                 sem = _get_mcp_call_semaphore()
                 timeout = float(getattr(settings, "MCP_DEFAULT_TIMEOUT_SECONDS", 20.0))
                 async with sem:
-                    return await asyncio.wait_for(
-                        conn.session.call_tool(tool_name, arguments=args),
-                        timeout=timeout,
-                    )
+                    try:
+                        return await asyncio.wait_for(conn.session.call_tool(tool_name, arguments=args), timeout=timeout)
+                    except Exception:
+                        self._schedule_reconnect(conn)
+                        raise
 
             # Adapt and register each tool
             for t in tools_raw:
@@ -267,13 +302,22 @@ class MCPManager:
             conn.status.tools = len(conn.cached_tools)
 
         except Exception as e:
-            logger.error(f"Error discovering tools from MCP server '{conn.config.id}': {e}")
+            logger.error('MCP discovery failed for %s (%s)', conn.config.id, type(e).__name__)
             conn.status.tools = 0
+            raise
 
     async def _disconnect_server(self, conn: ServerConnection) -> None:
         """Cleanly close connection and unregister tools for a server."""
         if conn._reconnect_task and not conn._reconnect_task.done():
             conn._reconnect_task.cancel()
+            try:
+                await conn._reconnect_task
+            except asyncio.CancelledError:
+                pass
+            return
+        await self._close_connection(conn)
+
+    async def _close_connection(self, conn):
 
         # Unregister tools from ToolRegistry
         self.registry.unregister_by_server(conn.config.id)
@@ -299,6 +343,9 @@ class MCPManager:
         conn.consecutive_failures = 0
         conn._backoff_seconds = 5.0
         if not conn.status.connected:
+            if conn._reconnect_task and not conn._reconnect_task.done():
+                conn.ready.clear()
+                conn.reconnect.set()
             return await self._connect_server(conn)
 
         await self._discover_and_register_tools(conn)

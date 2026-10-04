@@ -34,7 +34,7 @@ class ThinkingSlash(commands.Cog):
     ):
         await interaction.response.defer(thinking=True)
 
-        # RBAC check — admins only, consistent with /mode and /model set
+        # RBAC check... admins only, consistent with /mode and /model set
         if not await check_admin_authorization(interaction):
             await interaction.followup.send(embed=make_denied_embed(), ephemeral=True)
             return
@@ -63,17 +63,12 @@ class ThinkingSlash(commands.Cog):
                 if thinking_on:
                     embed = discord.Embed(
                         title="🧠 Deep Thinking Mode Enabled",
-                        description=(
-                            f"Channel <#{channel_id}> will now use **extended reasoning** "
-                            f"for all AI models (Gemini, DigitalOcean, Ollama, Kaggle).\n\n"
-                            f"Zauq will analyze problems step-by-step and reason deeply before answering — "
-                            f"expect **higher quality, more thorough** replies for complex tasks.\n\n"
-                            f"> ⚡ Extended token budget: **16k–65k tokens** allocated for reasoning"
-                        ),
+                        description=(f"Channel <#{channel_id}> requested native thinking. "
+                                     + res.json().get('detail', 'Support depends on the selected provider and model.')),
                         color=discord.Color.purple()
                     )
                     embed.set_footer(
-                        text="Active for all models. Use /thinking mode:off to disable."
+                        text="Model-dependent preference. Use /thinking mode:off to disable."
                     )
                 else:
                     embed = discord.Embed(

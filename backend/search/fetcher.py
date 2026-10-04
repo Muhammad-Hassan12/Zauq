@@ -23,10 +23,45 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _FETCH_SEM
 
 
-from backend.security.ssrf import is_safe_public_url  # noqa: F401
+from backend.security.ssrf import is_safe_public_url
+from backend.security.ssrf import is_safe_ip_address
 
 
-# ── Fetch implementation ──────────────────────────────────────────────────────
+async def _bounded_get(url: str, timeout: float) -> tuple[int, dict, str]:
+    """Resolve once, connect to that public IP, and cap bytes before decoding.
+
+    Original Host/SNI are retained for virtual hosting and certificate checks.
+    Proxy environment variables cannot bypass this transport boundary.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('Invalid public URL')
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    addresses = await asyncio.to_thread(socket.getaddrinfo, parsed.hostname, port, 0, socket.SOCK_STREAM)
+    ips = [a[4][0] for a in addresses]
+    if not ips or any(not is_safe_ip_address(ipaddress.ip_address(ip)) for ip in ips):
+        raise ValueError('Restricted destination')
+    target = httpx.URL(url).copy_with(host=ips[0])
+    headers = {'Host': parsed.netloc, 'User-Agent': _USER_AGENT, 'Accept-Encoding': 'identity'}
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+        async with client.stream('GET', target, headers=headers, extensions={'sni_hostname': parsed.hostname}) as response:
+            if response.status_code != 200:
+                return response.status_code, dict(response.headers), ''
+            if response.headers.get('content-encoding', 'identity').lower() not in ('identity', ''):
+                raise ValueError('Compressed downloads are not accepted')
+            limit = min(max(settings.WEB_FETCH_MAX_BYTES, 1), 2000000)
+            length = response.headers.get('content-length')
+            if length and int(length) > limit:
+                raise ValueError('Download exceeds byte limit')
+            body = bytearray()
+            async for chunk in response.aiter_raw(chunk_size=8192):
+                if len(body) + len(chunk) > limit:
+                    raise ValueError('Download exceeds byte limit')
+                body.extend(chunk)
+            return response.status_code, dict(response.headers), body.decode('utf-8', errors='replace')
+
+
+# Fetch implementation
 
 _USER_AGENT = "Mozilla/5.0 (compatible; Zauq-Bot/4.0)"
 _JINA_BASE = "https://r.jina.ai/"
@@ -36,13 +71,9 @@ async def _fetch_via_jina(url: str, max_chars: int) -> str | None:
     """Try to fetch readable content via Jina Reader. Returns None on failure."""
     jina_url = f"{_JINA_BASE}{url}"
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            res = await client.get(jina_url, headers={"User-Agent": _USER_AGENT})
-            if res.status_code == 200 and len(res.text.strip()) > 50:
-                text = res.text.strip()
-                if len(text) > max_chars:
-                    text = text[:max_chars] + "\n[...truncated]"
-                return text
+        status, _, body = await _bounded_get(jina_url, 8.0)
+        if status == 200 and len(body.strip()) > 50:
+            return body.strip()[:max_chars]
     except Exception as exc:
         logger.debug(f"Jina failed for '{url}': {exc}")
     return None
@@ -63,22 +94,19 @@ async def _fetch_direct(url: str, max_chars: int) -> str | None:
             if not is_safe_public_url(current_url):
                 logger.warning(f"Direct fetch blocked SSRF redirect to '{current_url}'")
                 return None
-            async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as client:
-                res = await client.get(current_url, headers=headers)
-                if res.status_code in (301, 302, 303, 307, 308):
-                    location = res.headers.get("Location")
-                    if location:
-                        current_url = urllib.parse.urljoin(current_url, location)
-                        continue
-                    break
-                if res.status_code == 200:
-                    html = re.sub(r"<(script|style).*?</\1>", "", res.text, flags=re.DOTALL | re.IGNORECASE)
-                    text = re.sub(r"<[^>]+>", " ", html)
-                    text = re.sub(r"\s+", " ", text).strip()
-                    if len(text) > max_chars:
-                        text = text[:max_chars] + "\n[...truncated]"
-                    return text if text else None
+            status, response_headers, body = await _bounded_get(current_url, 6.0)
+            if status in (301, 302, 303, 307, 308):
+                location = response_headers.get('location')
+                if location:
+                    current_url = urllib.parse.urljoin(current_url, location)
+                    continue
                 break
+            if status == 200:
+                html = re.sub(r"<(script|style).*?</\1>", "", body, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r"<[^>]+>", " ", html)
+                text = re.sub(r"\s+", " ", text).strip()
+                return text[:max_chars] or None
+            break
     except Exception as exc:
         logger.debug(f"Direct fetch failed for '{url}': {exc}")
     return None
@@ -100,6 +128,7 @@ async def fetch_url(
     Uses a semaphore to cap parallel fetch concurrency.
     """
     url = url.strip()
+    max_chars = max(100, min(max_chars, 12000))
 
     if not (url.startswith("http://") or url.startswith("https://")):
         return FetchResult(url=url, success=False, error="Invalid scheme (must be http/https)", method="blocked")

@@ -1,9 +1,4 @@
-FROM python:3.11-slim
-
-# Install Docker CLI so the sandbox can spawn sibling containers
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends docker.io && \
-    rm -rf /var/lib/apt/lists/*
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -12,7 +7,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
-COPY . .
+COPY backend ./backend
+COPY config/mcp_servers.example.json ./config/mcp_servers.example.json
+
+# Create dedicated non-root user and hand over ownership
+RUN adduser --disabled-password --no-create-home --uid 1000 zauq \
+    && chown -R zauq:zauq /app
+USER zauq
 
 # Expose backend port
 EXPOSE 8002

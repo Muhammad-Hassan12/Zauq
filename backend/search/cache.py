@@ -4,16 +4,17 @@ import hashlib
 import logging
 from collections import OrderedDict
 from typing import Any
+from backend.config import settings
 
 logger = logging.getLogger("zauq.search.cache")
 
 # Category-specific TTLs in seconds
 _CATEGORY_TTL: dict[str, int] = {
-    "news": 90,         # News/current events expire fast
-    "all": 300,         # General search: 5 minutes
+    "news": 90,         
+    "all": 300,         
     "github": 300,
-    "arxiv": 1800,      # Papers don't change often: 30 minutes
-    "docs": 900,        # Docs: 15 minutes
+    "arxiv": 1800,      
+    "docs": 900,        
     "wikipedia": 900,
 }
 _DEFAULT_TTL = 300
@@ -85,7 +86,8 @@ class SearchCache:
         }
 
     def ttl_for_category(self, category: str) -> int:
-        return _CATEGORY_TTL.get(category, _DEFAULT_TTL)
+        base = max(0, settings.WEB_SEARCH_CACHE_TTL_SECONDS)
+        return int(_CATEGORY_TTL.get(category, _DEFAULT_TTL) * base / _DEFAULT_TTL)
 
     def make_key(
         self,

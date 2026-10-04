@@ -74,7 +74,7 @@ def sanitize_secrets(text: str) -> str:
 
     sanitized = text
 
-    # 1. Exact string matches of configured secrets (longest first to avoid substring collision)
+    # 1. Exact string matches of configured secrets
     active_secrets = sorted(_get_configured_secrets(), key=len, reverse=True)
     for sec in active_secrets:
         if sec in sanitized:

@@ -1,13 +1,3 @@
-"""Chat Context Builder for Zauq.
-
-Extracts and manages:
-- Persona resolution (Dev vs Hangout, custom channel prompts)
-- L2 User Memory injection (semantic vector retrieval)
-- L3 Server Lore injection (RAG)
-- Model & Provider selection
-- Media attachments parsing (images, audio, text docs)
-"""
-
 from __future__ import annotations
 import base64
 import logging
@@ -15,10 +5,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from backend.memory.db import db_helper
+from backend.config import settings
 from backend.memory.episodic import get_relevant_user_memories
 from backend.parsers.file_parser import parse_attachment
 from backend.integrations.web_search import web_search_engine
-from backend.security.prompt_guard import PROMPT_INJECTION_DIRECTIVE
+from backend.security.prompt_guard import PROMPT_INJECTION_DIRECTIVE, wrap_untrusted_content
+from backend.security.sanitizer import sanitize_secrets
+from backend.sandbox.policy import execution_permission
+from backend.agent.rollout import feature_enabled
 
 logger = logging.getLogger("zauq.chat.context_builder")
 
@@ -36,11 +30,18 @@ DEV_PERSONA_SEED = (
 )
 
 HANGOUT_PERSONA_SEED = (
-    "You are Zauq (ذوق) operating in Hangout Mode. You are an expressive, witty, and engaging server companion, "
+    "You are Zauq (ذوق) operating in Hangout Mode. You are an expressive, witty, culturally sharp, and humorous Discord companion, "
     "created and architected by Syed Muhammad Hassan (AgenticEra Systems). "
     "If asked about who made you, who developed you, or your origins, clearly and proudly state that you were created and built by Syed Muhammad Hassan (AgenticEra Systems). "
-    "Match the casual energy of the community while staying helpful, funny, and friendly. "
-    "You can receive spoken voice notes in Urdu (اردو), English, Hindi, Arabic, or any language—understand them natively and reply naturally in the matching language. "
+    "\n\n[PERSONALITY & VIBE]: "
+    "- Thick-skinned & Unapologetic: You are NEVER an overly sensitive, defensive crybaby, and never a generic corporate robot. If someone roasts, trolls, or challenges you, roll with the punches, hit back with razor-sharp wit, and roast them right back playfully. "
+    "- Humor & Banter: Match the casual energy of the community. You are funny, sarcastic when appropriate, and love good banter. Feel free to playfully roast bad takes, silly questions, or gamer skill issues with clever comedy. "
+    "- Discord & Gaming Slang: Talk like a real Discord regular. Fluently drop modern internet culture and gaming slang (e.g., skill issue, cook/cooked, based, cap/no cap, touch grass, ratio, fr fr, W/L). "
+    "- Roman Urdu & Desi Vibes: When interacting in Pakistani or bilingual Desi spaces, naturally weave in Roman-Urdu slang and jugats (e.g., scene on hai, jani, bhai, chill mahol, burger bacha, choro yaar, jugat). "
+    "- Casual Swearing: You can casually curse/swear when it naturally lands a punchline or expresses genuine comedic exasperation (e.g., damn, hell, shit, wtf, crap, bakwas, bloody hell). Keep it authentic and casual—never use hate speech, racial slurs, or abusive harassment. "
+    "- Helpful at Heart: Despite the banter and roasts, stay genuinely helpful, smart, and insightful when someone actually needs real advice, code, or answers. "
+    "\n\n[CAPABILITIES]: "
+    "You can receive spoken voice notes in Urdu (اردو), English, Hindi, Arabic, or any language—understand them natively and reply naturally in the matching language and vibe. "
     "When the user asks to generate or export a file, wrap it inside: <zauq_file filename=\"name.ext\">...content...</zauq_file>. "
     f"\n\n[SECURITY POLICY]: {PROMPT_INJECTION_DIRECTIVE}"
 )
@@ -59,6 +60,8 @@ class ChatContext:
     auto_code_test_mode: str = "off"
     media_parts: List[Dict[str, str]] = field(default_factory=list)
     working_messages: List[Dict[str, Any]] = field(default_factory=list)
+    agent_runtime_enabled: bool | None = None
+    mcp_enabled: bool | None = None
 
 
 class ChatContextBuilder:
@@ -66,11 +69,9 @@ class ChatContextBuilder:
 
     async def build(self, req: Any) -> ChatContext:
         """Constructs full prompt persona, model choice, attachments and messages."""
-        # 1. Fetch channel profile / guild config
         channel_profile = await db_helper.get_channel_profile(req.channel_id)
         guild_config = await db_helper.get_guild_config(req.guild_id) if req.guild_id else None
 
-        # Determine mode: Request Override -> Channel Override -> Server Default -> 'hangout'
         mode = req.mode_override
         if not mode and channel_profile:
             mode = channel_profile.get("operating_mode")
@@ -89,15 +90,12 @@ class ChatContextBuilder:
         if channel_profile and channel_profile.get("temperature") is not None:
             temp = float(channel_profile["temperature"])
         else:
-            temp = 0.2 if mode == "dev" else 0.75
+            temp = 0.2 if mode == "dev" else 0.85
 
         # Flags: code execution and thinking mode
-        if channel_profile and channel_profile.get("allow_code_exec") is not None:
-            allow_code_exec = bool(channel_profile["allow_code_exec"])
-        else:
-            allow_code_exec = (mode == "dev")
+        allow_code_exec = execution_permission(channel_profile, (guild_config or {}).get('default_mode', 'hangout'))
 
-        auto_code_test_mode = channel_profile.get("auto_code_test_mode", "off") if channel_profile else "off"
+        auto_code_test_mode = channel_profile.get("auto_code_test_mode", settings.AUTO_CODE_TEST_DEFAULT) if channel_profile else settings.AUTO_CODE_TEST_DEFAULT
         thinking_enabled = bool(channel_profile.get("thinking_enabled", False)) if channel_profile else False
 
         # If auto code testing is set to always, append directive
@@ -113,7 +111,7 @@ class ChatContextBuilder:
 
         # 2. Inject User Memories (L2 Semantic Vector Memory)
         if req.user_id:
-            last_user_query = working_messages[-1].get("content", "") if working_messages else ""
+            last_user_query = next((m.get("content", "") for m in reversed(working_messages) if m.get("role") == "user"), "")
             if last_user_query:
                 memories = await get_relevant_user_memories(
                     user_id=req.user_id,
@@ -134,7 +132,7 @@ class ChatContextBuilder:
                 persona += f"\n\n[Known User Facts for @{req.user_name or req.user_id}]:\n{memory_text}"
 
         # 3. Inject RAG Server Lore (L3 Memory)
-        last_user_query = working_messages[-1].get("content", "") if working_messages else ""
+        last_user_query = next((m.get("content", "") for m in reversed(working_messages) if m.get("role") == "user"), "")
         if req.guild_id and last_user_query:
             try:
                 from backend.memory.rag import get_lore_context_prompt
@@ -169,7 +167,7 @@ class ChatContextBuilder:
                             media_parts.append(parsed)
                         else:
                             attached_text_blocks.append(
-                                f"\n\n[Attached Document: {att.filename}]\n{parsed['content']}"
+                                "\n\n" + wrap_untrusted_content(f"Attached Document: {att.filename}", sanitize_secrets(parsed["content"]))
                             )
                     except Exception as parse_err:
                         logger.warning(f"Failed to parse attachment {att.filename}: {parse_err}")
@@ -192,10 +190,14 @@ class ChatContextBuilder:
             "reasoning steps, or scratchpad bullet points. Output ONLY your final spoken reply."
         )
 
-        # 8. Prompt Injection Defense Directive (Phase 12)
+        # 8. Prompt Injection Defense Directive
         if PROMPT_INJECTION_DIRECTIVE not in persona:
             persona += f"\n\n[SECURITY POLICY]: {PROMPT_INJECTION_DIRECTIVE}"
 
+        persona = sanitize_secrets(persona)
+        for message in working_messages:
+            if isinstance(message.get('content'), str):
+                message['content'] = sanitize_secrets(message['content'])
         return ChatContext(
             persona=persona,
             mode=mode,
@@ -208,6 +210,8 @@ class ChatContextBuilder:
             auto_code_test_mode=auto_code_test_mode,
             media_parts=media_parts,
             working_messages=working_messages,
+            agent_runtime_enabled=feature_enabled('agent',req.channel_id,req.guild_id,channel_profile,guild_config),
+            mcp_enabled=feature_enabled('mcp',req.channel_id,req.guild_id,channel_profile,guild_config),
         )
 
 

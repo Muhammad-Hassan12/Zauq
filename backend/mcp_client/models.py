@@ -1,8 +1,3 @@
-"""Models and schemas for Zauq v4 MCP Client Layer.
-
-Defines Pydantic models for configuration, server definitions, and status reporting.
-"""
-
 from __future__ import annotations
 from typing import Any, Literal
 from pydantic import BaseModel, Field
@@ -11,7 +6,7 @@ from backend.tools.base import RiskLevel
 
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server connection."""
-    id: str
+    id: str = Field(min_length=1, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')
     enabled: bool = True
     transport: Literal["streamable_http", "stdio"] = "streamable_http"
     url: str | None = None
@@ -20,8 +15,11 @@ class MCPServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)
     allowed_guild_ids: list[str] = Field(default_factory=list)
-    default_risk: RiskLevel = "read"
-    timeout_seconds: float = 15.0
+    allow_global_access: bool = False
+    allowed_tools: list[str] = Field(default_factory=list)
+    selection_keywords: list[str] = Field(default_factory=list)
+    default_risk: RiskLevel = 'write'
+    timeout_seconds: float = Field(default=15.0, gt=0, le=60)
     namespace_prefix: str | None = None
     tool_risks: dict[str, RiskLevel] = Field(default_factory=dict)
 
@@ -48,7 +46,8 @@ class MCPServerStatus(BaseModel):
             "tools": self.tools,
         }
         if self.error:
-            res["error"] = self.error
+            from backend.security.sanitizer import sanitize_secrets
+            res["error"] = sanitize_secrets(self.error)[:200]
         return res
 
 

@@ -16,12 +16,6 @@ _CATEGORY_CONFIG: dict[str, dict] = {
     "news":      {"endpoint": "/news",      "query_prefix": ""},
 }
 
-_DOCS_FILTER = (
-    "site:docs.python.org OR site:developer.mozilla.org OR "
-    "site:fastapi.tiangolo.com OR site:devdocs.io"
-)
-
-
 class SerperProvider:
     """
     Serper.dev Google Search API provider.
@@ -47,7 +41,7 @@ class SerperProvider:
         prefix = cfg["query_prefix"]
         q = query.strip()
         if category == "docs":
-            return f"({_DOCS_FILTER}) {q}"
+            return f"{q} official documentation"
         return f"{prefix}{q}"
 
     def _parse_results(
@@ -95,15 +89,14 @@ class SerperProvider:
         """
         Execute a Serper search call.
 
-        Returns an empty SearchResponse when the API key is not set
-        (so callers can fall back to DuckDuckGo without crashing).
+        Returns explicit unavailability when the key is absent; no hidden fallback.
         """
         n = max_results or settings.WEB_SEARCH_MAX_RESULTS
         effective_query = self._build_query(query, category)
 
         if not self.available:
             logger.warning("SerperProvider: no API key — skipping search")
-            return SearchResponse(query=query, results=[], category=category, provider="serper")
+            return SearchResponse(query=query, results=[], category=category, provider="serper", error='Search unavailable: SERPER_API_KEY is not configured', search_calls=0)
 
         cat = (category or "all").lower().strip()
         cfg = _CATEGORY_CONFIG.get(cat, _CATEGORY_CONFIG["all"])
@@ -123,21 +116,21 @@ class SerperProvider:
                 res = await client.post(endpoint, json=payload, headers=headers)
                 if res.status_code != 200:
                     logger.warning(
-                        f"Serper returned HTTP {res.status_code} for query='{query}': {res.text[:200]}"
+                        f"Serper returned HTTP {res.status_code}"
                     )
-                    return SearchResponse(query=query, results=[], category=category, provider="serper")
+                    return SearchResponse(query=query, results=[], category=category, provider="serper", error=f'Search provider returned HTTP {res.status_code}')
 
                 data = res.json()
                 response = self._parse_results(data, query, category, n)
                 logger.info(
-                    f"Serper search ok: query='{query}' category={category} "
+                    f"Serper search ok: category={category} "
                     f"results={len(response.results)}"
                 )
                 return response
 
         except Exception as exc:
-            logger.exception(f"Serper search failed for query='{query}': {exc}")
-            return SearchResponse(query=query, results=[], category=category, provider="serper")
+            logger.warning('Serper request failed (%s)', type(exc).__name__)
+            return SearchResponse(query=query, results=[], category=category, provider="serper", error='Search provider request failed')
 
 
 # Module-level singleton

@@ -42,10 +42,9 @@ async def rank_context(req: ContextRankRequest):
             sim = cosine_similarity(query_vec, msg_vec)
             scored_messages.append((idx, sim, msg.model_dump()))
 
-        # Sort by similarity score descending, but preserve chronological order for top-k
         scored_messages.sort(key=lambda x: x[1], reverse=True)
         top_candidates = scored_messages[:req.top_k]
-        top_candidates.sort(key=lambda x: x[0])  # Sort back chronologically
+        top_candidates.sort(key=lambda x: x[0])
 
         ranked = [item[2] for item in top_candidates]
         return {"ranked_messages": ranked}
